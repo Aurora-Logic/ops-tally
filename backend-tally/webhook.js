@@ -1,29 +1,33 @@
 const mongoose = require('mongoose');
+const { webhookSecret } = require('./config');
 
-// Collection name for raw Tally events — no model needed, raw inserts
 const EVENTS_COLLECTION = 'tally_events';
 
 /**
  * Handle a webhook push from TDL running inside Tally Prime.
  * Body shape (JSON):
- *   { voucherType, party, amount, voucherNo, date, narration }
+ *   { voucherType, party, amount, voucherNo, date, narration, secret }
  *
- * We:
- *  1. Persist the raw event (audit trail)
- *  2. For Receipt vouchers — find matching dealer + mark latest payment
- *  3. For Sales/Sales Invoice — find matching order by refId in narration
+ * Fix 1: Verifies shared secret so only genuine Tally pushes are accepted.
+ * Fix 3: Sales Invoice matching now works because salesOrder.js writes OPS-REF in narration.
  */
 async function handleTallyWebhook(body) {
-  const { voucherType, party, amount, voucherNo, date, narration } = body;
+  const { voucherType, party, amount, voucherNo, date, narration, secret } = body;
+
+  // Fix 1: reject if secret is configured but doesn't match
+  if (webhookSecret && secret !== webhookSecret) {
+    console.warn(`[Webhook] Rejected unauthorised push — party: ${party}, type: ${voucherType}`);
+    return { ok: false, error: 'Unauthorized', status: 401 };
+  }
 
   if (!voucherType || !party) {
-    return { ok: false, error: 'Missing voucherType or party' };
+    return { ok: false, error: 'Missing voucherType or party', status: 400 };
   }
 
   const db = mongoose.connection.db;
   const now = new Date();
 
-  // 1. Persist raw event
+  // 1. Persist raw event — also acts as dedup log for the scheduled receipt poll (Fix 6)
   const event = {
     voucherType,
     party,
@@ -37,7 +41,7 @@ async function handleTallyWebhook(body) {
 
   let action = 'logged';
 
-  // 2. Receipt voucher → record payment against dealer
+  // 2. Receipt → record last payment against dealer
   if (voucherType === 'Receipt') {
     const result = await db.collection('dealers').updateOne(
       { dealer_name: { $regex: new RegExp(`^${escapeRegex(party)}$`, 'i') } },
@@ -55,19 +59,18 @@ async function handleTallyWebhook(body) {
     if (result.matchedCount > 0) action = 'payment_recorded';
   }
 
-  // 3. Sales Invoice → stamp tally invoice number on order
-  // TDL narration should contain the OPS refId (we set it as narration when pushing sales order)
+  // 3. Sales / Sales Invoice → stamp tally invoice number on OPS order
+  // Fix 3: works now that salesOrder.js/invoice.js write OPS-REF:<id> into NARRATION
   if (voucherType === 'Sales' || voucherType === 'Sales Invoice') {
     if (narration) {
-      // narration may contain the refId we sent, e.g. "OPS-REF:64abc123..."
       const refMatch = narration.match(/OPS-REF:([a-f0-9]{24})/i);
       if (refMatch) {
         const refId = refMatch[1];
-        await db.collection('updatedorderhistories').updateOne(
-          { 'orders._id': new mongoose.Types.ObjectId(refId) },
+        const res = await db.collection('updatedorderhistories').updateOne(
+          { 'orders._id': refId },
           { $set: { 'orders.$.tallyInvoiceNo': voucherNo, 'orders.$.tallyInvoicedAt': now } }
         );
-        action = 'order_invoiced';
+        if (res.matchedCount > 0) action = 'order_invoiced';
       }
     }
   }

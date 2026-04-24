@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
+const https = require('https');
+const http = require('http');
 const TallyJob = require('../models/TallyJob').default;
 const { sendToTally } = require('./bridge');
+const { alertWebhookUrl } = require('./config');
 
 const FLUSH_INTERVAL_MS = 2000;
 let flushing = false;
@@ -47,6 +50,7 @@ async function flush() {
             lastError: err.message,
           });
           console.error(`[Queue] Job ${job._id} (${job.type}) permanently failed: ${err.message}`);
+          fireAlert(job, err.message);
         } else {
           const nextAttemptAt = new Date(Date.now() + backoffMs(retries));
           await TallyJob.findByIdAndUpdate(job._id, {
@@ -74,6 +78,34 @@ async function resumeOnStartup() {
     console.log(`[Queue] Resuming ${count} pending Tally job(s) on startup`);
     setTimeout(flush, FLUSH_INTERVAL_MS);
   }
+}
+
+// Fix 8: POST to TALLY_ALERT_WEBHOOK_URL when a job permanently fails.
+// Compatible with Slack, Discord, or any HTTP endpoint that accepts JSON.
+function fireAlert(job, errorMsg) {
+  if (!alertWebhookUrl) return;
+  const body = JSON.stringify({
+    text: `⚠️ Tally sync job permanently failed`,
+    jobId: job._id,
+    type: job.type,
+    refId: job.refId,
+    error: errorMsg,
+    retries: job.retries,
+    failedAt: new Date().toISOString(),
+  });
+  const mod = alertWebhookUrl.startsWith('https') ? https : http;
+  try {
+    const url = new URL(alertWebhookUrl);
+    const req = mod.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    });
+    req.on('error', () => {}); // fire-and-forget, never crash on alert failure
+    req.write(body);
+    req.end();
+  } catch {}
 }
 
 module.exports = { enqueue, resumeOnStartup };

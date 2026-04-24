@@ -52,6 +52,7 @@ const { init: initTallyBridge } = _require('./tally/bridge');
 const { resumeOnStartup: tallyResumeOnStartup } = _require('./tally/queue');
 const { startCustomerSyncJob } = _require('./tally/jobs/customerSyncJob');
 const { startStockSyncJob } = _require('./tally/jobs/stockSyncJob');
+const { startReceiptPollJob } = _require('./tally/jobs/receiptPollJob');
 
 const collectDefaultMetrics = client.collectDefaultMetrics;
 const Registry = client.Registry;
@@ -316,6 +317,7 @@ const server = http.createServer(app);
 tallyResumeOnStartup();
 startCustomerSyncJob();
 startStockSyncJob();
+startReceiptPollJob();
 
 // --- Socket.IO Optimization ---
 // Per-socket rate limiting (simple in-memory, for production use Redis or similar)

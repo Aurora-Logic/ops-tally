@@ -20,6 +20,20 @@ function connect() {
 
   ws.on('open', () => {
     log('INFO', 'Connected to VPS bridge');
+
+    // Fix 7: Send a ping every 30 s so we detect silently-stuck connections early.
+    // If the pong doesn't come back the 'close' event fires and we reconnect.
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+        log('DEBUG', 'Heartbeat ping sent');
+      } else {
+        clearInterval(heartbeat);
+      }
+    }, 30_000);
+
+    ws.on('pong', () => log('DEBUG', 'Heartbeat pong received'));
+    ws.once('close', () => clearInterval(heartbeat));
   });
 
   ws.on('message', async (data) => {

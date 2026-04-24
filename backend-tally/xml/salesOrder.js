@@ -1,5 +1,10 @@
-function buildSalesOrderXML({ date, customerName, items }) {
+const { tallyCompany } = require('../config');
+
+// Fix 3: refId written into NARRATION so the TDL webhook can match it back to an OPS order.
+// Fix 10: respects TALLY_COMPANY env var to prevent cross-company sync accidents.
+function buildSalesOrderXML({ date, customerName, items, refId }) {
   const fmt = (d) => new Date(d).toISOString().slice(0, 10).replace(/-/g, '');
+  const company = tallyCompany;
 
   const inventoryLines = items.map(({ name, qty, rate }) => `
     <INVENTORYENTRIES.LIST>
@@ -21,7 +26,8 @@ function buildSalesOrderXML({ date, customerName, items }) {
       <REQUESTDESC>
         <REPORTNAME>Vouchers</REPORTNAME>
         <STATICVARIABLES>
-          <SVCURRENTCOMPANY/>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
         </STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>
@@ -29,6 +35,7 @@ function buildSalesOrderXML({ date, customerName, items }) {
           <VOUCHER VCHTYPE="Sales Order" ACTION="Create">
             <DATE>${fmt(date)}</DATE>
             <VOUCHERTYPENAME>Sales Order</VOUCHERTYPENAME>
+            <NARRATION>OPS-REF:${refId || ''}</NARRATION>
             <PARTYLEDGERNAME>${customerName}</PARTYLEDGERNAME>
             <ALLLEDGERENTRIES.LIST>
               <LEDGERNAME>${customerName}</LEDGERNAME>

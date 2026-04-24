@@ -2,7 +2,7 @@ import { RequestHandler } from "express";
 import mongoose from "mongoose";
 import { createRequire } from "module";
 const _require = createRequire(import.meta.url);
-const { syncSalesOrder } = _require('../tally/sync');
+const { syncSalesOrder, syncCancellation } = _require('../tally/sync');
 import { OrderHistory, IOrderHistory, IOrder, IOrderItem } from "../models/UpdatedOrderHistory";
 import { Product, SubCategory } from "../models/UpdatedProduct";
 import User from "../models/User";
@@ -106,7 +106,8 @@ export const addOrder: RequestHandler = async (req, res): Promise<void> => {
         res.status(400).json({ message: `Product not found for itemId: ${item.itemId}` });
         return;
       }
-      item._productName = productExists.item; // stash for Tally sync below
+      item._productName = productExists.item;       // stash for Tally sync below
+      item._gstRate = (productExists as any).gstRate ?? 18; // Fix 4: per-product GST rate
     }
 
     // Prepare the new order structure
@@ -162,10 +163,19 @@ export const addOrder: RequestHandler = async (req, res): Promise<void> => {
         name: items[idx]._productName || String(i.itemId),
         qty: i.quantity,
         rate: i.priceAtTimeOfOrder,
-        gstRate: 18,
+        gstRate: items[idx]._gstRate ?? 18, // Fix 4: per-product GST rate
       })),
       refId: String(orderHistory._id),
     }).catch((err: Error) => console.error('[Tally] syncSalesOrder failed:', err.message));
+
+    // Fix 9: Immediately deduct stock so OPS shows accurate qty without waiting 30 min cron.
+    (async () => {
+      for (const i of newOrder.items as any[]) {
+        try {
+          await Product.findByIdAndUpdate(i.itemId, { $inc: { stockqty: -i.quantity } });
+        } catch {}
+      }
+    })();
 
     // Send notification
     try {
@@ -440,26 +450,41 @@ export const updateOrder: RequestHandler = async (req, res): Promise<void> => {
     await orderHistory.save();
 
     // Tally sync on status transitions (fire-and-forget)
-    if (shipmentStatus && previousStatus !== shipmentStatus && shipmentStatus === 'InTransit') {
+    if (shipmentStatus && previousStatus !== shipmentStatus) {
       (async () => {
         try {
           const dealer = await User.findById(orderHistory.dealerId).lean() as any;
           const productIds = order.items.map((i: any) => i.itemId);
-          const products = await Product.find({ _id: { $in: productIds } }, 'item').lean() as any[];
-          const nameMap = Object.fromEntries(products.map((p: any) => [String(p._id), p.item]));
-          await syncSalesOrder({
-            orderDate: new Date(),
-            customerName: dealer?.name ?? 'Unknown',
-            items: order.items.map((i: any) => ({
-              name: nameMap[String(i.itemId)] ?? String(i.itemId),
-              qty: i.quantity,
-              rate: i.priceAtTimeOfOrder ?? 0,
-              gstRate: 18,
-            })),
-            refId: `inv-${orderId}`,
-          });
+          // Fix 4: fetch gstRate alongside item name
+          const products = await Product.find({ _id: { $in: productIds } }, 'item gstRate').lean() as any[];
+          const productMap = Object.fromEntries(products.map((p: any) => [String(p._id), p]));
+          const mappedItems = order.items.map((i: any) => ({
+            name: productMap[String(i.itemId)]?.item ?? String(i.itemId),
+            qty: i.quantity,
+            rate: i.priceAtTimeOfOrder ?? 0,
+            gstRate: productMap[String(i.itemId)]?.gstRate ?? 18, // Fix 4
+          }));
+
+          if (shipmentStatus === 'InTransit') {
+            await syncSalesOrder({
+              orderDate: new Date(),
+              customerName: dealer?.name ?? 'Unknown',
+              items: mappedItems,
+              refId: `inv-${orderId}`,
+            });
+          }
+
+          // Fix 5: push Credit Note to Tally when order is cancelled
+          if (shipmentStatus === 'Cancelled') {
+            await syncCancellation({
+              orderDate: new Date(),
+              customerName: dealer?.name ?? 'Unknown',
+              items: mappedItems,
+              refId: `cancel-${orderId}`,
+            });
+          }
         } catch (e: any) {
-          console.error('[Tally] InTransit invoice sync failed:', e.message);
+          console.error('[Tally] Status transition sync failed:', e.message);
         }
       })();
     }

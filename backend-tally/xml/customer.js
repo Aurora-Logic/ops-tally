@@ -1,4 +1,7 @@
+const { tallyCompany } = require('../config');
+
 function buildCustomerXML({ name, phone, email, address, gstin }) {
+  const company = tallyCompany;
   const gstFields = gstin ? `
       <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>
       <PARTYGSTIN>${gstin}</PARTYGSTIN>` : '';
@@ -18,7 +21,7 @@ function buildCustomerXML({ name, phone, email, address, gstin }) {
       <REQUESTDESC>
         <REPORTNAME>All Masters</REPORTNAME>
         <STATICVARIABLES>
-          <SVCURRENTCOMPANY/>
+          <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
         </STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>

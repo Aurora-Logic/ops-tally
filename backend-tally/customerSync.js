@@ -1,5 +1,6 @@
 const { XMLParser } = require('fast-xml-parser');
 const { sendToTally } = require('./bridge');
+const { tallyCompany } = require('./config');
 
 // In OPS, Tally "customers" are Dealers. Require the model at runtime to avoid
 // circular deps and to allow this module to be used before DB connects.
@@ -19,7 +20,7 @@ function buildCustomerQueryXML() {
         <REPORTNAME>Ledger</REPORTNAME>
         <STATICVARIABLES>
           <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-          <SVCURRENTCOMPANY/>
+          <SVCURRENTCOMPANY>${tallyCompany}</SVCURRENTCOMPANY>
           <LEDGROUPFILTER>Sundry Debtors</LEDGROUPFILTER>
         </STATICVARIABLES>
       </REQUESTDESC>
@@ -51,13 +52,17 @@ async function syncCustomersToOPS() {
         ? [String(ledger.LEDPHONE)]
         : ['0000000000'];
 
+      // Fix 2: $set for live Tally fields so updates (phone, GST) propagate to OPS.
+      // $setOnInsert only for OPS-specific defaults Tally doesn't know about.
       await Dealer.findOneAndUpdate(
         { dealer_name: name },
         {
-          $setOnInsert: {
-            dealer_name: name,
+          $set: {
             dealer_phone: phones,
             dealer_gstNo: ledger.PARTYGSTIN || '',
+          },
+          $setOnInsert: {
+            dealer_name: name,
             dealer_baseDiscount: 0,
             dealer_cashDiscount: 0,
             dealer_status: 'active',

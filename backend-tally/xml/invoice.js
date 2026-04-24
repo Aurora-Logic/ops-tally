@@ -1,7 +1,11 @@
 const { computeTax } = require('./gst');
+const { tallyCompany } = require('../config');
 
-function buildInvoiceXML({ date, customerName, items, isInterState, paymentMode }) {
+// Fix 3: refId in NARRATION for webhook matching.
+// Fix 10: TALLY_COMPANY enforcement.
+function buildInvoiceXML({ date, customerName, items, isInterState, paymentMode, refId }) {
   const fmt = (d) => new Date(d).toISOString().slice(0, 10).replace(/-/g, '');
+  const company = tallyCompany;
 
   let subtotal = 0;
   const taxAccumulator = {};
@@ -56,7 +60,8 @@ function buildInvoiceXML({ date, customerName, items, isInterState, paymentMode 
       <REQUESTDESC>
         <REPORTNAME>Vouchers</REPORTNAME>
         <STATICVARIABLES>
-          <SVCURRENTCOMPANY/>
+          <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+          <SVCURRENTCOMPANY>${company}</SVCURRENTCOMPANY>
         </STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>
@@ -64,6 +69,7 @@ function buildInvoiceXML({ date, customerName, items, isInterState, paymentMode 
           <VOUCHER VCHTYPE="Sales" ACTION="Create">
             <DATE>${fmt(date)}</DATE>
             <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
+            <NARRATION>OPS-REF:${refId || ''}</NARRATION>
             <PARTYLEDGERNAME>${customerName}</PARTYLEDGERNAME>
             <ALLLEDGERENTRIES.LIST>
               <LEDGERNAME>${customerName}</LEDGERNAME>

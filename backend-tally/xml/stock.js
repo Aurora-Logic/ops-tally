@@ -1,5 +1,6 @@
 const { XMLParser } = require('fast-xml-parser');
 const { sendToTally } = require('../bridge');
+const { tallyCompany } = require('../config');
 
 function buildStockQueryXML() {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -13,7 +14,7 @@ function buildStockQueryXML() {
         <REPORTNAME>Stock Items</REPORTNAME>
         <STATICVARIABLES>
           <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
-          <SVCURRENTCOMPANY/>
+          <SVCURRENTCOMPANY>${tallyCompany}</SVCURRENTCOMPANY>
         </STATICVARIABLES>
       </REQUESTDESC>
     </EXPORTDATA>

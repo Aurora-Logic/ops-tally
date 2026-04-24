@@ -10,6 +10,7 @@ const { syncSalesOrder, syncCustomer } = require('../tally/sync');
 const { fetchStockLevels } = require('../tally/xml/stock');
 const { runSync: runCustomerSync } = require('../tally/customerSync');
 const { runStockSync } = require('../tally/jobs/stockSyncJob');
+const { runReceiptPoll } = require('../tally/jobs/receiptPollJob');
 const { handleTallyWebhook, getTallyEvents } = require('../tally/webhook');
 
 // GET /api/tally/jobs
@@ -102,6 +103,7 @@ router.post('/test/sales-order', async (req: Request, res: Response) => {
       orderDate: new Date(),
       customerName: req.body.customerName || 'Test Customer',
       items: req.body.items || [{ name: 'Steel Rod 10mm', qty: 2, rate: 120, gstRate: 18 }],
+      refId: req.body.refId || new (require('mongoose').Types.ObjectId)().toString(),
     };
     const job = await syncSalesOrder(order);
     res.json({ ok: true, jobId: job._id, type: job.type });
@@ -127,11 +129,26 @@ router.post('/test/customer', async (req: Request, res: Response) => {
 });
 
 // POST /api/tally/webhook  — TDL pushes from Tally Prime land here
+// Fix 1: returns 401 if secret mismatch, 400 for bad payload
 router.post('/webhook', async (req: Request, res: Response) => {
   try {
     const result = await handleTallyWebhook(req.body);
-    if (!result.ok) { res.status(400).json(result); return; }
+    if (!result.ok) {
+      const statusCode = (result as any).status || 400;
+      res.status(statusCode).json({ ok: false, error: result.error });
+      return;
+    }
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/tally/sync/receipts  — Fix 6: manually trigger the TDL fallback receipt poll
+router.post('/sync/receipts', async (_req: Request, res: Response) => {
+  try {
+    await runReceiptPoll();
+    res.json({ ok: true, message: 'Receipt poll triggered' });
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });
   }

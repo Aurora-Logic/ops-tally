@@ -5,18 +5,38 @@
 ;;;   → Add TDP File Path → browse to this file → Accept
 ;;;
 ;;; What it does:
-;;;   Every time a voucher is saved in Tally (Receipt, Payment,
-;;;   Sales Invoice, etc.) this TDL fires an HTTP POST to the
-;;;   OPS backend.  OPS records the event and can update order
-;;;   status or dealer payment state in real time.
+;;;   Every time a Receipt, Payment, Sales, or Sales Invoice
+;;;   voucher is saved in Tally, this TDL fires an HTTP POST to
+;;;   the OPS backend webhook endpoint.
 ;;;
-;;; IMPORTANT: Replace OPS_SERVER_URL below with your VPS IP/domain.
+;;; SETUP — edit the two variables below before loading:
+;;;   OPS Server URL    : your VPS address
+;;;   OPS Webhook Secret: must match TALLY_WEBHOOK_SECRET on the VPS
+;;;
+;;; NOTE ON RELIABILITY (Fix 6):
+;;;   TDL fires once and does not retry. If the VPS is unreachable
+;;;   when a voucher is saved, that event is permanently lost from
+;;;   the TDL path. The OPS backend compensates with a scheduled
+;;;   receipt poll every 6 hours as a fallback safety net.
+;;;   Keep the VPS online for best real-time accuracy.
+;;;
+;;; NOTE ON COMPANY (Fix 10):
+;;;   This TDL fires for the currently active Tally company.
+;;;   If you use multiple companies, ensure the correct company is
+;;;   active before saving vouchers. The OPS backend targets the
+;;;   company set in TALLY_COMPANY env var (empty = active company).
 ;;; ============================================================
 
-;;; --- Configuration -----------------------------------------
+;;; --- Configuration — EDIT THESE TWO LINES ------------------
 [Variable: OPS Server URL]
     Type    : String
     Default : "http://YOUR_VPS_IP:1000/api/tally/webhook"
+
+;;; Fix 1: Shared secret — set the same value as TALLY_WEBHOOK_SECRET on the VPS.
+;;; Leave empty ("") to disable auth (not recommended in production).
+[Variable: OPS Webhook Secret]
+    Type    : String
+    Default : ""
 
 ;;; --- Event hook: fires after any voucher is saved ----------
 [System: Events]
@@ -28,6 +48,7 @@
 
     ;;; Local vars
     Variable : lURL      : String
+    Variable : lSecret   : String
     Variable : lType     : String
     Variable : lParty    : String
     Variable : lAmt      : String
@@ -37,36 +58,39 @@
     Variable : lBody     : String
     Variable : lResult   : String
 
-    ;;; Only push voucher types that matter to OPS
-    ;;; Receipt = money received from dealer in Tally
-    ;;; Payment = money paid out (purchases)
-    ;;; Sales   = sales invoice confirmed
-    ;;; Skip internal journal/contra/stock entries
+    ;;; Only push voucher types that matter to OPS.
+    ;;; Receipt      = money received from dealer (payment tracking)
+    ;;; Payment      = money paid out (purchase tracking)
+    ;;; Sales        = sales invoice confirmed in Tally
+    ;;; Sales Invoice = same as Sales in some Tally configurations
+    ;;; Everything else (Journal, Contra, Stock Journal) is ignored.
     010 : SET : lType : $VoucherTypeName
     020 : IF  : NOT (##lType = "Receipt" OR ##lType = "Payment" OR ##lType = "Sales" OR ##lType = "Sales Invoice")
     030 :     RETURN
     040 : END IF
 
     ;;; Collect voucher fields
-    050 : SET : lURL   : ##"OPS Server URL"
-    060 : SET : lParty : $PartyLedgerName
-    070 : SET : lAmt   : $$String:$Amount
-    080 : SET : lVchNo : $VoucherNumber
-    090 : SET : lDate  : $$DSPDateMonthYear:$Date
-    100 : SET : lNarr  : $Narration
+    050 : SET : lURL    : ##"OPS Server URL"
+    060 : SET : lSecret : ##"OPS Webhook Secret"
+    070 : SET : lParty  : $PartyLedgerName
+    080 : SET : lAmt    : $$String:$Amount
+    090 : SET : lVchNo  : $VoucherNumber
+    100 : SET : lDate   : $$DSPDateMonthYear:$Date
+    110 : SET : lNarr   : $Narration
 
-    ;;; Build JSON body
-    110 : SET : lBody : "{" +
-          + """voucherType""" + ":" + """" + ##lType  + """" + "," +
-          + """party"""       + ":" + """" + ##lParty + """" + "," +
-          + """amount"""      + ":" + ##lAmt          + ","  +
-          + """voucherNo"""   + ":" + """" + ##lVchNo + """" + "," +
-          + """date"""        + ":" + """" + ##lDate  + """" + "," +
-          + """narration"""   + ":" + """" + ##lNarr  + """" +
+    ;;; Build JSON body — Fix 1: secret included so backend can verify authenticity
+    120 : SET : lBody : "{" +
+          + """voucherType""" + ":" + """" + ##lType   + """" + "," +
+          + """party"""       + ":" + """" + ##lParty  + """" + "," +
+          + """amount"""      + ":" + ##lAmt           + ","  +
+          + """voucherNo"""   + ":" + """" + ##lVchNo  + """" + "," +
+          + """date"""        + ":" + """" + ##lDate   + """" + "," +
+          + """narration"""   + ":" + """" + ##lNarr   + """" + "," +
+          + """secret"""      + ":" + """" + ##lSecret + """" +
           + "}"
 
-    ;;; Fire HTTP POST — headers: Content-Type:application/json
-    120 : HTTP POST : ##lURL : ##lBody : "Content-Type:application/json" : lResult
+    ;;; Fire HTTP POST
+    130 : HTTP POST : ##lURL : ##lBody : "Content-Type:application/json" : lResult
 
-    ;;; Log result to Tally log for debugging
-    130 : LOG : "[OPS-Sync] Sent " + ##lType + " | " + ##lParty + " | " + ##lAmt + " | Result: " + ##lResult
+    ;;; Log to Tally log file for debugging (C:\Users\<user>\AppData\Roaming\Tally Solutions\...)
+    140 : LOG : "[OPS-Sync] Sent " + ##lType + " | " + ##lParty + " | " + ##lAmt + " | Result: " + ##lResult
