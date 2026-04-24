@@ -1,0 +1,72 @@
+;;; ============================================================
+;;; OPS-Tally Sync TDL  —  ops-sync.tdl
+;;; Place this file on the Windows machine and load it in:
+;;;   Tally Prime → F12 → Advanced Configuration → TDL & Add-on
+;;;   → Add TDP File Path → browse to this file → Accept
+;;;
+;;; What it does:
+;;;   Every time a voucher is saved in Tally (Receipt, Payment,
+;;;   Sales Invoice, etc.) this TDL fires an HTTP POST to the
+;;;   OPS backend.  OPS records the event and can update order
+;;;   status or dealer payment state in real time.
+;;;
+;;; IMPORTANT: Replace OPS_SERVER_URL below with your VPS IP/domain.
+;;; ============================================================
+
+;;; --- Configuration -----------------------------------------
+[Variable: OPS Server URL]
+    Type    : String
+    Default : "http://YOUR_VPS_IP:1000/api/tally/webhook"
+
+;;; --- Event hook: fires after any voucher is saved ----------
+[System: Events]
+    On: Save, Voucher
+    Call : OPS Send Voucher Event
+
+;;; --- Main function that builds payload and POSTs -----------
+[Function: OPS Send Voucher Event]
+
+    ;;; Local vars
+    Variable : lURL      : String
+    Variable : lType     : String
+    Variable : lParty    : String
+    Variable : lAmt      : String
+    Variable : lVchNo    : String
+    Variable : lDate     : String
+    Variable : lNarr     : String
+    Variable : lBody     : String
+    Variable : lResult   : String
+
+    ;;; Only push voucher types that matter to OPS
+    ;;; Receipt = money received from dealer in Tally
+    ;;; Payment = money paid out (purchases)
+    ;;; Sales   = sales invoice confirmed
+    ;;; Skip internal journal/contra/stock entries
+    010 : SET : lType : $VoucherTypeName
+    020 : IF  : NOT (##lType = "Receipt" OR ##lType = "Payment" OR ##lType = "Sales" OR ##lType = "Sales Invoice")
+    030 :     RETURN
+    040 : END IF
+
+    ;;; Collect voucher fields
+    050 : SET : lURL   : ##"OPS Server URL"
+    060 : SET : lParty : $PartyLedgerName
+    070 : SET : lAmt   : $$String:$Amount
+    080 : SET : lVchNo : $VoucherNumber
+    090 : SET : lDate  : $$DSPDateMonthYear:$Date
+    100 : SET : lNarr  : $Narration
+
+    ;;; Build JSON body
+    110 : SET : lBody : "{" +
+          + """voucherType""" + ":" + """" + ##lType  + """" + "," +
+          + """party"""       + ":" + """" + ##lParty + """" + "," +
+          + """amount"""      + ":" + ##lAmt          + ","  +
+          + """voucherNo"""   + ":" + """" + ##lVchNo + """" + "," +
+          + """date"""        + ":" + """" + ##lDate  + """" + "," +
+          + """narration"""   + ":" + """" + ##lNarr  + """" +
+          + "}"
+
+    ;;; Fire HTTP POST — headers: Content-Type:application/json
+    120 : HTTP POST : ##lURL : ##lBody : "Content-Type:application/json" : lResult
+
+    ;;; Log result to Tally log for debugging
+    130 : LOG : "[OPS-Sync] Sent " + ##lType + " | " + ##lParty + " | " + ##lAmt + " | Result: " + ##lResult
