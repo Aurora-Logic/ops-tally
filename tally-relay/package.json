@@ -4,7 +4,7 @@
   "description": "Relay agent for Tally Prime XML API bridge",
   "main": "relay.js",
   "scripts": {
-    "start": "node relay.js",
+    "start": "node --env-file=.env relay.js",
     "pm2": "pm2 start ecosystem.config.js"
   },
   "dependencies": {
