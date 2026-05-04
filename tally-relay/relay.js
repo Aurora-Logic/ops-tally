@@ -16,7 +16,9 @@ function log(level, msg) {
 
 function connect() {
   log('INFO', `Connecting to VPS at ${VPS_URL}`);
-  const ws = new WebSocket(VPS_URL);
+  const ws = new WebSocket(VPS_URL, {
+    rejectUnauthorized: false
+  });
 
   ws.on('open', () => {
     log('INFO', 'Connected to VPS bridge');
