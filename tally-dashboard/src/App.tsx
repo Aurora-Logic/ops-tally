@@ -3,7 +3,7 @@ import {
   Activity, AlertCircle, ArrowLeftRight, ArrowRight, ArrowRightLeft,
   CheckCircle2, ChevronDown, ChevronRight, Clock, Database,
   Info, Loader2, Package, RefreshCw, RotateCcw, Send,
-  Terminal, Wifi, WifiOff, Zap, Bell,
+  Terminal, Wifi, WifiOff, Zap, Bell, Users,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -73,6 +73,7 @@ const api = {
   syncStock:      () => post('/api/tally/sync/stock'),
   syncCustomers:  () => post('/api/tally/sync/customers'),
   pushProducts:   () => post('/api/tally/sync/products-to-tally'),
+  pushCustomers:  () => post('/api/tally/sync/customers-to-tally'),
   testOrder:      (b: object) => post('/api/tally/test/sales-order', b),
   testCustomer:   (b: object) => post('/api/tally/test/customer', b),
   events:         (limit = 50) => get(`/api/tally/events?limit=${limit}`),
@@ -581,9 +582,11 @@ function GuideTab() {
   const [stockSyncing, setStockSyncing]     = useState(false);
   const [customerSyncing, setCustomerSyncing] = useState(false);
   const [productsPushing, setProductsPushing] = useState(false);
+  const [customersPushing, setCustomersPushing] = useState(false);
   const [stockResult, setStockResult]       = useState('');
   const [customerResult, setCustomerResult] = useState('');
   const [productsResult, setProductsResult] = useState('');
+  const [customersPushResult, setCustomersPushResult] = useState('');
 
   const forceSyncStock = async () => {
     setStockSyncing(true); setStockResult('');
@@ -602,8 +605,15 @@ function GuideTab() {
   const forcePushProducts = async () => {
     setProductsPushing(true); setProductsResult('');
     const d = await api.pushProducts();
-    setProductsResult(d.ok ? `✓ ${d.message}` : `✗ ${d.error}`);
+    setProductsResult(d.ok ? '✓ Products push job created. Check Jobs tab.' : `✗ ${d.error}`);
     setProductsPushing(false);
+  };
+
+  const pushCustomersToTally = async () => {
+    setCustomersPushing(true); setCustomersPushResult('');
+    const d = await api.pushCustomers();
+    setCustomersPushResult(d.ok ? '✓ Customers push job created. Check Jobs tab.' : `✗ ${d.error}`);
+    setCustomersPushing(false);
   };
 
   return (
@@ -677,6 +687,31 @@ function GuideTab() {
                 <p>• Real-time push from Tally on any save event</p>
               </div>
               <p className="text-xs text-amber-600 mt-2">All other flows above work with zero TDL — Tally's built-in XML API is sufficient.</p>
+              <div className="flex flex-col gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full justify-start"
+                onClick={forcePushProducts}
+                disabled={productsPushing}
+              >
+                <Package className={cn("mr-2 h-4 w-4", productsPushing && "animate-spin")} />
+                {productsPushing ? 'Pushing...' : 'Push All OPS Products to Tally'}
+              </Button>
+              {productsResult && <p className={cn("text-[10px] px-1", productsResult.startsWith('✓') ? "text-emerald-600" : "text-red-600")}>{productsResult}</p>}
+
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full justify-start"
+                onClick={pushCustomersToTally}
+                disabled={customersPushing}
+              >
+                <Users className={cn("mr-2 h-4 w-4", customersPushing && "animate-spin")} />
+                {customersPushing ? 'Pushing...' : 'Push All OPS Dealers to Tally'}
+              </Button>
+              {customersPushResult && <p className={cn("text-[10px] px-1", customersPushResult.startsWith('✓') ? "text-emerald-600" : "text-red-600")}>{customersPushResult}</p>}
+            </div>
             </div>
           </CardContent>
         </Card>
