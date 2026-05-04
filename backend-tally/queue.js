@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const https = require('https');
 const http = require('http');
-const TallyJob = require('../models/TallyJob').default;
+const TallyJob = require('./models/TallyJob').default;
 const { sendToTally } = require('./bridge');
 const { alertWebhookUrl } = require('./config');
 

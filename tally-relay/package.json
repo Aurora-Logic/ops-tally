@@ -4,11 +4,16 @@
   "description": "Relay agent for Tally Prime XML API bridge",
   "main": "relay.js",
   "scripts": {
-    "start": "node --env-file=.env relay.js",
-    "pm2": "pm2 start ecosystem.config.js"
+    "start": "node relay.js",
+    "pm2": "pm2 start ecosystem.config.js",
+    "build": "pkg relay.js --target node18-win-x64 --output dist/tally-relay.exe"
   },
   "dependencies": {
     "ws": "^8.0.0",
-    "axios": "^1.0.0"
+    "axios": "^1.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
   }
 }

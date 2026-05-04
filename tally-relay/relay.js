@@ -1,3 +1,4 @@
+require('dotenv').config();
 const WebSocket = require('ws');
 const axios = require('axios');
 
@@ -53,7 +54,7 @@ function connect() {
     try {
       const response = await axios.post(TALLY_URL, xml, {
         headers: { 'Content-Type': 'text/xml' },
-        timeout: 8000,
+        timeout: 60000,
       });
       ws.send(JSON.stringify({ jobId, response: response.data }));
       log('INFO', `Job ${jobId} completed OK`);

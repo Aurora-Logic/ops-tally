@@ -72,6 +72,7 @@ const api = {
   stock:          () => get('/api/tally/stock'),
   syncStock:      () => post('/api/tally/sync/stock'),
   syncCustomers:  () => post('/api/tally/sync/customers'),
+  pushProducts:   () => post('/api/tally/sync/products-to-tally'),
   testOrder:      (b: object) => post('/api/tally/test/sales-order', b),
   testCustomer:   (b: object) => post('/api/tally/test/customer', b),
   events:         (limit = 50) => get(`/api/tally/events?limit=${limit}`),
@@ -579,8 +580,10 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 function GuideTab() {
   const [stockSyncing, setStockSyncing]     = useState(false);
   const [customerSyncing, setCustomerSyncing] = useState(false);
+  const [productsPushing, setProductsPushing] = useState(false);
   const [stockResult, setStockResult]       = useState('');
   const [customerResult, setCustomerResult] = useState('');
+  const [productsResult, setProductsResult] = useState('');
 
   const forceSyncStock = async () => {
     setStockSyncing(true); setStockResult('');
@@ -594,6 +597,13 @@ function GuideTab() {
     const d = await api.syncCustomers();
     setCustomerResult(d.ok ? `✓ ${d.upserted ?? 0} customers synced from Tally` : `✗ ${d.error}`);
     setCustomerSyncing(false);
+  };
+
+  const forcePushProducts = async () => {
+    setProductsPushing(true); setProductsResult('');
+    const d = await api.pushProducts();
+    setProductsResult(d.ok ? `✓ ${d.message}` : `✗ ${d.error}`);
+    setProductsPushing(false);
   };
 
   return (
@@ -678,6 +688,19 @@ function GuideTab() {
             <CardDescription>Trigger any scheduled sync immediately without waiting</CardDescription>
           </CardHeader>
           <CardContent className="grid sm:grid-cols-2 gap-4">
+            {/* OPS -> Tally Products */}
+            <div className="space-y-2 col-span-full mb-2">
+              <p className="text-sm font-medium">Push Products to Tally (Test Data Setup)</p>
+              <p className="text-xs text-muted-foreground">Takes all products currently in OPS MongoDB and pushes them into Tally as Stock Items.</p>
+              <Button size="sm" className="w-full bg-blue-600 hover:bg-blue-700 text-white" onClick={forcePushProducts} disabled={productsPushing}>
+                {productsPushing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+                Push All OPS Products → Tally
+              </Button>
+              {productsResult && <p className={cn('text-xs', productsResult.startsWith('✓') ? 'text-emerald-700' : 'text-destructive')}>{productsResult}</p>}
+            </div>
+            
+            <Separator className="col-span-full" />
+
             <div className="space-y-2">
               <p className="text-sm font-medium">Stock Levels</p>
               <p className="text-xs text-muted-foreground">Pulls closing balances from Tally and writes to OPS product stockqty</p>
