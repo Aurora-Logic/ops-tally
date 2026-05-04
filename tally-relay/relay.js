@@ -1,23 +1,34 @@
 require('dotenv').config();
 const WebSocket = require('ws');
 const axios = require('axios');
+const crypto = require('crypto');
 
 const VPS_URL = process.env.VPS_URL;
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+
 const TALLY_PORT = process.env.TALLY_PORT || '9000';
 const TALLY_URL = `http://localhost:${TALLY_PORT}`;
 
-if (!VPS_URL) {
-  console.error('[Relay] VPS_URL environment variable is required');
+if (!CLIENT_ID || !CLIENT_SECRET) {
+  console.error('[Relay] CRITICAL: CLIENT_ID or CLIENT_SECRET is missing in .env!');
   process.exit(1);
 }
 
 function log(level, msg) {
-  console.log(`[${new Date().toISOString()}] [${level}] ${msg}`);
+  console.log(`[${new Date().toISOString()}] [${level}] [${CLIENT_ID}] ${msg}`);
 }
 
 function connect() {
-  log('INFO', `Connecting to VPS at ${VPS_URL}`);
-  const ws = new WebSocket(VPS_URL, {
+  const timestamp = Date.now().toString();
+  const signature = crypto
+    .createHmac('sha256', CLIENT_SECRET)
+    .update(CLIENT_ID + timestamp)
+    .digest('hex');
+
+  const connectionUrl = `${VPS_URL}?clientId=${CLIENT_ID}&timestamp=${timestamp}&signature=${signature}`;
+  log('INFO', `Connecting to cloud at ${VPS_URL}...`);
+  const ws = new WebSocket(connectionUrl, {
     rejectUnauthorized: false
   });
 
