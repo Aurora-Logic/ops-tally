@@ -32,6 +32,7 @@ function customersXML() {
   const ledgers = CUSTOMERS.map((c) => `
     <LEDGER>
       <NAME>${c.NAME}</NAME>
+      <PARENT>Sundry Debtors</PARENT>
       ${c.LEDPHONE ? `<LEDPHONE>${c.LEDPHONE}</LEDPHONE>` : ''}
       ${c.LEDEMAIL ? `<LEDEMAIL>${c.LEDEMAIL}</LEDEMAIL>` : ''}
       ${c.PARTYGSTIN ? `<PARTYGSTIN>${c.PARTYGSTIN}</PARTYGSTIN>` : ''}

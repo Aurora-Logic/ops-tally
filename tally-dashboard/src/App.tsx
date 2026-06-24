@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Activity, AlertCircle, ArrowLeftRight, ArrowRight, ArrowRightLeft,
   CheckCircle2, ChevronDown, ChevronRight, Clock, Database,
-  Info, Loader2, Package, RefreshCw, RotateCcw, Send,
+  Info, Loader2, Package, RefreshCw, RotateCcw, Send, Download,
   Terminal, Wifi, WifiOff, Zap, Bell, Users,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -60,23 +60,25 @@ const TYPE_BADGE: Record<string, string> = {
 };
 
 // ─── API ──────────────────────────────────────────────────────────
+const BASE_URL = (import.meta.env.VITE_API_URL || '/api/v1') + '/tally';
 const get  = (url: string) => fetch(url).then(r => r.json());
 const post = (url: string, body?: object) =>
   fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then(r => r.json());
 
 const api = {
-  stats:          () => get('/api/tally/jobs/stats'),
-  jobs:           (s?: string) => get(`/api/tally/jobs${s ? `?status=${s}` : ''}`),
-  relay:          () => get('/api/tally/relay/status'),
-  retry:          (id: string) => post(`/api/tally/jobs/${id}/retry`),
-  stock:          () => get('/api/tally/stock'),
-  syncStock:      () => post('/api/tally/sync/stock'),
-  syncCustomers:  () => post('/api/tally/sync/customers'),
-  pushProducts:   () => post('/api/tally/sync/products-to-tally'),
-  pushCustomers:  () => post('/api/tally/sync/customers-to-tally'),
-  testOrder:      (b: object) => post('/api/tally/test/sales-order', b),
-  testCustomer:   (b: object) => post('/api/tally/test/customer', b),
-  events:         (limit = 50) => get(`/api/tally/events?limit=${limit}`),
+  stats:          () => get(`${BASE_URL}/jobs/stats`),
+  jobs:           (s?: string) => get(`${BASE_URL}/jobs${s ? `?status=${s}` : ''}`),
+  relay:          () => get(`${BASE_URL}/relay/status`),
+  retry:          (id: string) => post(`${BASE_URL}/jobs/${id}/retry`),
+  stock:          () => get(`${BASE_URL}/stock`),
+  syncStock:      () => post(`${BASE_URL}/sync/stock`),
+  syncCustomers:  () => post(`${BASE_URL}/sync/customers`),
+  pushProducts:   () => post(`${BASE_URL}/sync/products-to-tally`),
+  pushCustomers:  () => post(`${BASE_URL}/sync/customers-to-tally`),
+  pullProducts:   () => post(`${BASE_URL}/sync/products-from-tally`),
+  testOrder:      (b: object) => post(`${BASE_URL}/test/sales-order`, b),
+  testCustomer:   (b: object) => post(`${BASE_URL}/test/customer`, b),
+  events:         (limit = 50) => get(`${BASE_URL}/events?limit=${limit}`),
 };
 
 // ─── Stat card ────────────────────────────────────────────────────
@@ -313,6 +315,7 @@ function StockTab() {
   const [items, setItems] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState('');
   const [syncMsg, setSyncMsg] = useState('');
 
@@ -332,6 +335,16 @@ function StockTab() {
     finally { setSyncing(false); }
   };
 
+  const importProducts = async () => {
+    setImporting(true); setSyncMsg('');
+    try {
+      const d = await api.pullProducts();
+      setSyncMsg(d.ok ? `✓ ${d.message || 'Products imported successfully'}` : `✗ ${d.error}`);
+      if (d.ok) load();
+    } catch (e: any) { setSyncMsg(`✗ ${e.message}`); }
+    finally { setImporting(false); }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -340,6 +353,10 @@ function StockTab() {
           <p className="text-sm text-muted-foreground">Pulled from Tally Prime — auto-synced to OPS products every 30 min</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={importProducts} disabled={importing}>
+            {importing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Download className="h-4 w-4 mr-1" />}
+            Import Products
+          </Button>
           <Button size="sm" variant="outline" onClick={syncToOPS} disabled={syncing}>
             {syncing ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <ArrowLeftRight className="h-4 w-4 mr-1" />}
             Sync to OPS Now
@@ -587,6 +604,15 @@ function GuideTab() {
   const [customerResult, setCustomerResult] = useState('');
   const [productsResult, setProductsResult] = useState('');
   const [customersPushResult, setCustomersPushResult] = useState('');
+  const [productsPulling, setProductsPulling] = useState(false);
+  const [productsPullResult, setProductsPullResult] = useState('');
+
+  const forcePullProducts = async () => {
+    setProductsPulling(true); setProductsPullResult('');
+    const d = await api.pullProducts();
+    setProductsPullResult(d.ok ? `✓ ${d.message || 'Products imported'}` : `✗ ${d.error}`);
+    setProductsPulling(false);
+  };
 
   const forceSyncStock = async () => {
     setStockSyncing(true); setStockResult('');
@@ -722,7 +748,7 @@ function GuideTab() {
             <CardTitle className="flex items-center gap-2"><Zap className="h-4 w-4" /> Force Sync Now</CardTitle>
             <CardDescription>Trigger any scheduled sync immediately without waiting</CardDescription>
           </CardHeader>
-          <CardContent className="grid sm:grid-cols-2 gap-4">
+          <CardContent className="grid sm:grid-cols-3 gap-4">
             {/* OPS -> Tally Products */}
             <div className="space-y-2 col-span-full mb-2">
               <p className="text-sm font-medium">Push Products to Tally (Test Data Setup)</p>
@@ -735,6 +761,16 @@ function GuideTab() {
             </div>
             
             <Separator className="col-span-full" />
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Import Products</p>
+              <p className="text-xs text-muted-foreground">Pulls all stock items from Tally and creates/updates OPS Product records</p>
+              <Button size="sm" variant="outline" className="w-full" onClick={forcePullProducts} disabled={productsPulling}>
+                {productsPulling ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                Import Products → OPS
+              </Button>
+              {productsPullResult && <p className={cn('text-xs', productsPullResult.startsWith('✓') ? 'text-emerald-700' : 'text-destructive')}>{productsPullResult}</p>}
+            </div>
 
             <div className="space-y-2">
               <p className="text-sm font-medium">Stock Levels</p>

@@ -11,7 +11,8 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:1000',
+        // TODO: update the target: url to env variable from .env file
+        target: 'http://localhost:7000',
         changeOrigin: true,
       },
     },
