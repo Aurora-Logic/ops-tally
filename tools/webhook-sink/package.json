@@ -1,0 +1,10 @@
+{
+  "name": "@opstally/webhook-sink",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test webhook receiver — verifies OpsTally Agent signatures and logs events",
+  "type": "module",
+  "scripts": {
+    "start": "node sink.js"
+  }
+}
