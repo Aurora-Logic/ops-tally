@@ -8,7 +8,7 @@ export default defineConfig({
     alias: { '@': path.resolve(__dirname, './src') },
   },
   server: {
-    port: 5174,
+    port: 5175,
     proxy: {
       '/api': {
         // TODO: update the target: url to env variable from .env file
