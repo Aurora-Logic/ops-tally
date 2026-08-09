@@ -1,0 +1,43 @@
+appId: com.intalix.opstally
+productName: OpsTally Agent
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  shortcutName: OpsTally Agent
+# --- Code signing: LAUNCH PREREQUISITE (SmartScreen/AV flag unsigned background agents) ---
+# Option A — Azure Trusted Signing (cheapest managed path). Uncomment and fill:
+# win:
+#   azureSignOptions:
+#     endpoint: https://weu.codesigning.azure.net
+#     codeSigningAccountName: YOUR_ACCOUNT
+#     certificateProfileName: YOUR_PROFILE
+# Option B — OV/EV certificate file:
+# win:
+#   signtoolOptions:
+#     certificateFile: path/to/cert.pfx
+#     certificatePassword: ${env.CSC_KEY_PASSWORD}
+#     timeStampServer: http://timestamp.digicert.com
+
+# --- Auto-update: code is wired (src/main/updater.ts) but DORMANT until a publish
+# target below is uncommented AND builds are signed. Then every `npm run dist`
+# uploads artifacts + update metadata, and installed agents self-update.
+# publish:
+#   provider: github
+#   owner: YOUR_GH_OWNER
+#   repo: ops-tally
+# — or —
+# publish:
+#   provider: s3
+#   bucket: opstally-releases
+#   region: ap-south-1
