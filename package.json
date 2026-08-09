@@ -1,0 +1,24 @@
+{
+  "name": "ops-tally",
+  "private": true,
+  "version": "1.0.0",
+  "description": "OpsTally Agent — Tally Prime to webhook bridge",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "dev:agent": "npm run dev -w apps/agent",
+    "probe": "npm run probe -w packages/tally-client"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "electron@38.8.6": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.25.12": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

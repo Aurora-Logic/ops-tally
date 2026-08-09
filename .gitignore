@@ -1,6 +1,9 @@
 node_modules/
 dist/
+dist-electron/
+out/
 .env
 *.log
-package-lock.json
 100000/
+*.db
+*.db-journal
