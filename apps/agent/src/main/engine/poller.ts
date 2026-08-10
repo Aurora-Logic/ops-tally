@@ -12,6 +12,7 @@ export interface PollerSettings {
   paused: boolean;
   voucherLookbackDays: number;
   intervalsMinutes: Record<PollEntity, number>;
+  webhookUrl: string;
 }
 
 export type PollerState = 'idle' | 'polling' | 'paused' | 'tally_down' | 'error';
@@ -117,6 +118,14 @@ export class Poller {
       return;
     }
 
+    // No webhook configured yet — nothing to deliver to, so skip the heavy
+    // entity pulls entirely. Only do a cheap reachability probe, and only on
+    // one of the three timers so we're not tripling even that.
+    if (!settings.webhookUrl) {
+      if (entity === 'vouchers') await this.healthCheck(settings);
+      return;
+    }
+
     const baselineKey = `baseline:${entity}`;
     const isBaseline = this.deps.db.getMeta(baselineKey) !== 'done';
     const ctx = this.context(isBaseline);
@@ -148,6 +157,22 @@ export class Poller {
       if (events.length) this.deps.onEvents?.(events);
       this.deps.onStatus?.({ state: 'idle', lastPollAt: new Date().toISOString() });
     } catch (err: any) {
+      this.reportError(err);
+    }
+  }
+
+  /** Cheap liveness probe (company list only) used while no webhook is set. */
+  private async healthCheck(settings: PollerSettings): Promise<void> {
+    this.deps.client.host = settings.tallyHost;
+    this.deps.client.port = settings.tallyPort;
+    try {
+      await this.deps.client.testConnection();
+      this.deps.onStatus?.({
+        state: 'idle',
+        lastPollAt: new Date().toISOString(),
+        message: 'Tally reachable — webhook not configured, sync disabled',
+      });
+    } catch (err) {
       this.reportError(err);
     }
   }

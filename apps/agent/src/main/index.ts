@@ -81,6 +81,7 @@ if (!gotLock) {
         paused: cfg.paused,
         voucherLookbackDays: cfg.voucherLookbackDays,
         intervalsMinutes: cfg.intervalsMinutes,
+        webhookUrl: cfg.webhookUrl,
       };
     },
     onEvents: (events) => {
