@@ -5,11 +5,13 @@ import { buildVouchersXML } from './queries/vouchers.js';
 import { buildStockItemsXML } from './queries/stockItems.js';
 import { buildLedgersXML } from './queries/ledgers.js';
 import { buildSalesRatesXML } from './queries/salesRates.js';
+import { buildPurchaseRatesXML } from './queries/purchaseRates.js';
 import { parseCompanyCollection } from './parse/companies.js';
 import { parseVoucherCollection } from './parse/vouchers.js';
 import { parseStockCollection } from './parse/stock.js';
 import { parseLedgerCollection } from './parse/ledgers.js';
 import { parseSalesRates } from './parse/salesRates.js';
+import { parsePurchaseRates } from './parse/purchaseRates.js';
 import type {
   CompanyInfo,
   LedgerJSON,
@@ -58,14 +60,21 @@ export class TallyClient {
     return parseSalesRates(await this.exec(buildSalesRatesXML(this.company, fromDate)));
   }
 
+  async getPurchaseLastRates(fromDate?: Date): Promise<Map<string, number>> {
+    return parsePurchaseRates(await this.exec(buildPurchaseRatesXML(this.company, fromDate)));
+  }
+
   /**
-   * Stock items with resolved sale/cost prices. Sale-price resolution needs
-   * the last-sale-rate map; pass `withSalePrices: false` to skip that second
-   * (potentially slow) voucher scan.
+   * Stock items with resolved sale/cost prices. Price resolution needs the
+   * last-sale-rate and last-purchase-rate maps (the latter is the
+   * deterministic cost fallback for fully-sold-out items); pass
+   * `withSalePrices: false` to skip both (potentially slow) voucher scans.
    */
   async getStockItems(withSalePrices = true): Promise<StockItemJSON[]> {
-    const rates = withSalePrices ? await this.getSalesLastRates() : new Map<string, number>();
-    return parseStockCollection(await this.exec(buildStockItemsXML(this.company)), rates);
+    const [saleRates, purchaseRates] = withSalePrices
+      ? await Promise.all([this.getSalesLastRates(), this.getPurchaseLastRates()])
+      : [new Map<string, number>(), new Map<string, number>()];
+    return parseStockCollection(await this.exec(buildStockItemsXML(this.company)), saleRates, purchaseRates);
   }
 
   async getLedgers(): Promise<LedgerJSON[]> {

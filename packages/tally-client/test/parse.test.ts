@@ -72,4 +72,12 @@ describe('parseSalesRates', () => {
     expect(rates.get('laminate sheet teak')).toBe(196); // 20260805 beats 20260701
     expect(rates.get('premium plywood 18mm')).toBe(1400);
   });
+
+  it('resolves rates from invoice-mode vouchers (ALLINVENTORYENTRIES.LIST, typed nodes)', async () => {
+    // Real Tally GST Sales invoices export lines under ALLINVENTORYENTRIES.LIST
+    // with STOCKITEMNAME/RATE as { _, $ } typed nodes, not the plain
+    // INVENTORYENTRIES.LIST/string shape the other fixture covers.
+    const rates = parseSalesRates(await load('sales-rates-invoice-mode.xml'));
+    expect(rates.get('twin wheel plate 40mm')).toBe(196);
+  });
 });

@@ -14,11 +14,13 @@ export { parseStockItem, parseStockCollection } from './parse/stock.js';
 export { parseLedger, parseLedgerCollection } from './parse/ledgers.js';
 export { parseCompanyCollection } from './parse/companies.js';
 export { parseSalesRates } from './parse/salesRates.js';
+export { parsePurchaseRates } from './parse/purchaseRates.js';
 export { buildCompaniesXML } from './queries/companies.js';
 export { buildVouchersXML } from './queries/vouchers.js';
 export { buildStockItemsXML } from './queries/stockItems.js';
 export { buildLedgersXML, buildLedgersFallbackXML } from './queries/ledgers.js';
 export { buildSalesRatesXML } from './queries/salesRates.js';
+export { buildPurchaseRatesXML } from './queries/purchaseRates.js';
 export type {
   TallyClientOptions,
   CompanyInfo,

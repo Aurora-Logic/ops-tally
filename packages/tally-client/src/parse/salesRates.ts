@@ -19,13 +19,19 @@ export function parseSalesRates(parsed: any): Map<string, number> {
   });
 
   for (const v of vouchers) {
-    const entries = asArray(v['INVENTORYENTRIES.LIST']);
+    // Invoice-mode vouchers (the Tally default for GST Sales) export their lines
+    // under ALLINVENTORYENTRIES.LIST, not INVENTORYENTRIES.LIST — same shape
+    // drift parseVoucher() in parse/vouchers.ts already accounts for.
+    const entries = asArray(v['ALLINVENTORYENTRIES.LIST'] ?? v['INVENTORYENTRIES.LIST']);
     for (const entry of entries) {
       if (!entry || typeof entry !== 'object') continue;
-      const itemName = entry.STOCKITEMNAME || (entry.$ && entry.$.STOCKITEMNAME);
+      // STOCKITEMNAME arrives as a plain string only when the field has no TYPE
+      // attribute; with one (the common case) it's { _, $ } like every other
+      // typed node — text() unwraps both shapes the same way textAttr() does.
+      const itemName = text(entry.STOCKITEMNAME ?? (entry.$ && entry.$.STOCKITEMNAME)).trim();
       const rateVal = entry.RATE || (entry.$ && entry.$.RATE);
-      if (itemName && typeof itemName === 'string') {
-        const key = itemName.trim().toLowerCase();
+      if (itemName) {
+        const key = itemName.toLowerCase();
         if (!lastSaleRates.has(key)) {
           const rate = extractRate(rateVal);
           if (rate > 0) lastSaleRates.set(key, rate);

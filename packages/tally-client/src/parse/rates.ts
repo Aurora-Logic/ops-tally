@@ -59,9 +59,17 @@ export function getSalePrice(item: any, lastSaleRates: Map<string, number>): num
 
 /**
  * Get the Cost Price for a stock item from Tally.
- * Priority: STANDARDCOST → CLOSINGRATE → STANDARDCOSTLIST.LIST → ClosingValue/ClosingBalance → 0
+ * Priority: STANDARDCOST → CLOSINGRATE → STANDARDCOSTLIST.LIST →
+ * ClosingValue/ClosingBalance → last purchase rate → 0
+ *
+ * The first four all depend on the item currently holding stock (Tally can't
+ * compute a valuation rate for zero closing balance). A fully-sold-out item
+ * — closingQty 0 — falls through all of them, so `lastPurchaseRates` (built
+ * from actual Purchase vouchers, same pattern as getSalePrice's
+ * lastSaleRates) is the deterministic backstop: any item ever purchased at
+ * least once still resolves a real cost instead of 0.
  */
-export function getCostPrice(item: any): number {
+export function getCostPrice(item: any, lastPurchaseRates: Map<string, number> = new Map()): number {
   const stdCost = item.STANDARDCOST || (item.$ && item.$.STANDARDCOST);
   const sc = extractRate(stdCost);
   if (sc > 0) return sc;
@@ -79,6 +87,12 @@ export function getCostPrice(item: any): number {
     (item.$ && item.$.CLOSINGBALANCE);
   const qty = parseFloat(qtyVal) || 0;
   if (closingVal > 0 && qty > 0) return parseFloat((closingVal / qty).toFixed(2));
+
+  const name = item.NAME || (item.$ && item.$.NAME) || '';
+  if (name) {
+    const lpr = lastPurchaseRates.get(String(name).trim().toLowerCase());
+    if (lpr && lpr > 0) return lpr;
+  }
 
   return 0;
 }
