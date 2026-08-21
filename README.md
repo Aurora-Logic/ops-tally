@@ -187,8 +187,8 @@ delivery 401s.
 
 ## Events
 
-`voucher.created` · `voucher.updated` · `voucher.cancelled` · `stock.updated` ·
-`stock.snapshot` · `ledger.created` · `ledger.updated` · `ping`
+`voucher.created` · `voucher.updated` · `voucher.cancelled` · `voucher.snapshot` ·
+`stock.updated` · `stock.snapshot` · `ledger.created` · `ledger.updated` · `ping`
 
 Envelope:
 

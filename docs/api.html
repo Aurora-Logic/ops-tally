@@ -556,6 +556,7 @@
         <li class="evt"><a href="#evt-ledger">ledger.created / .updated</a></li>
         <li class="evt"><a href="#evt-voucher">voucher.created / .updated</a></li>
         <li class="evt"><a href="#evt-voucher-cancelled">voucher.cancelled</a></li>
+        <li class="evt"><a href="#evt-voucher-snapshot">voucher.snapshot</a></li>
       </ul>
     </div>
     <div class="group">
@@ -761,13 +762,34 @@ app.post(<span class="st">'/webhooks/opstally'</span>, express.raw({ type: <span
 
       <h3 class="event-anchor" id="evt-voucher">voucher.created / voucher.updated</h3>
       <div class="event-head"><span class="pill">voucher.created</span><span class="pill">voucher.updated</span></div>
-      <p class="event-fires"><strong>Fires when</strong> a voucher &mdash; invoice, receipt, payment, journal, and so on &mdash; is first seen, or its content changes, within the Agent's configured lookback window (90 days by default; see <a href="#intervals">Polling intervals</a>).</p>
+      <p class="event-fires"><strong>Fires when</strong> a voucher &mdash; invoice, receipt, payment, journal, and so on &mdash; is first seen, or its content changes, within the Agent's configured lookback window (90 days by default; see <a href="#intervals">Polling intervals</a>) and matches the configured voucher type allowlist.</p>
+      <p>By default only Sales, Purchase, Receipt, Payment, Journal, Credit Note, and Debit Note vouchers sync &mdash; other types (Payroll, Attendance, Stock Journal, and so on) are filtered out inside the Tally query itself and never leave Tally. Configurable per install in the Agent's Polling settings; leave it empty to sync every voucher type.</p>
       <p>Payload is a single <a href="#type-voucher">Voucher</a> object.</p>
 
       <h3 class="event-anchor" id="evt-voucher-cancelled">voucher.cancelled</h3>
       <div class="event-head"><span class="pill warn">voucher.cancelled</span></div>
       <p class="event-fires"><strong>Fires when</strong> a previously-seen voucher's cancelled flag flips to true. Same <a href="#type-voucher">Voucher</a> shape, with <code class="inline">isCancelled: true</code>.</p>
       <p>There is no separate delete event for vouchers &mdash; cancellation is Tally's own supported way to void a voucher, and it's what this event tracks.</p>
+
+      <h3 class="event-anchor" id="evt-voucher-snapshot">voucher.snapshot</h3>
+      <div class="event-head"><span class="pill">voucher.snapshot</span></div>
+      <p class="event-fires"><strong>Fires when</strong> an operator triggers a manual full voucher resync from the Agent. Carries the company's entire history for the configured voucher type allowlist (see <a href="#evt-voucher">voucher.created / voucher.updated</a>) regardless of whether anything changed &mdash; useful for rebuilding your voucher store from scratch or recovering from drift.</p>
+      <p>Unlike <code class="inline">voucher.created</code>/<code class="inline">.updated</code>, which are bounded by the configured lookback window, a resync walks the company's full history from its books-begin date, in non-overlapping date windows (12 months by default), fetched one window at a time with a short pause between requests so Tally's single-threaded gateway isn't hammered by a multi-year backfill.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Payload field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="fname">vouchers</span></td><td><span class="ftype">Voucher[]</span></td><td>Up to 500 vouchers per event &mdash; see <a href="#type-voucher">Voucher</a>.</td></tr>
+            <tr><td><span class="fname">chunk</span></td><td><span class="ftype">number</span></td><td>1-based index of this chunk, scoped to the date window it came from.</td></tr>
+            <tr><td><span class="fname">total_chunks</span></td><td><span class="ftype">number</span></td><td>Total chunks for that window's batch &mdash; not the whole resync.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">
+        <span class="callout-label">Chunking spans multiple windows</span>
+        <p>A full resync issues one request per date window and chunks each window's results independently, so you'll see several <code class="inline">chunk 1 / total_chunks N</code> sequences in a row, one per window, rather than one continuous count across the whole run. Treat every chunk as additive/upsert, keyed by <code class="inline">masterId</code> or <code class="inline">guid</code> &mdash; date windows never overlap, so there's no risk of double-counting.</p>
+      </div>
     </section>
 
     <section class="block" id="type-stock">
@@ -903,7 +925,7 @@ app.post(<span class="st">'/webhooks/opstally'</span>, express.raw({ type: <span
       <p>The Agent keeps a local snapshot of the last known state per record and only emits an event when something actually changed &mdash; your system never has to re-derive "what's new" itself.</p>
       <div class="callout">
         <span class="callout-label">First run</span>
-        <p>A fresh install, or switching Tally companies, triggers a silent baseline pass: the Agent snapshots everything it sees but sends no events, so you don't get flooded with thousands of <code class="inline">.created</code> events for pre-existing data. Trigger a manual <code class="inline">stock.snapshot</code> from the Agent any time you want the full current catalog pushed explicitly.</p>
+        <p>A fresh install, or switching Tally companies, triggers a silent baseline pass: the Agent snapshots everything it sees but sends no events, so you don't get flooded with thousands of <code class="inline">.created</code> events for pre-existing data. Trigger a manual <code class="inline">stock.snapshot</code> any time you want the full current catalog pushed explicitly, or a <code class="inline">voucher.snapshot</code> to push the company's entire voucher history.</p>
       </div>
     </section>
 
@@ -942,7 +964,7 @@ app.post(<span class="st">'/webhooks/opstally'</span>, express.raw({ type: <span
       <p>The Agent detects the connection failure, surfaces it in its own status UI, and tries again on the next poll. No events are lost &mdash; they're just delayed until Tally is back.</p>
 
       <h3>What happens if my endpoint is down for an extended period?</h3>
-      <p>Events queue locally on the Agent and retry on the backoff schedule above, up to 12 attempts spanning roughly 10 hours per event. For longer outages, trigger a <code class="inline">stock.snapshot</code> (and review recent vouchers) once you're back, to reconcile anything that aged out of retry.</p>
+      <p>Events queue locally on the Agent and retry on the backoff schedule above, up to 12 attempts spanning roughly 10 hours per event. For longer outages, trigger a <code class="inline">stock.snapshot</code> and/or a <code class="inline">voucher.snapshot</code> once you're back, to reconcile anything that aged out of retry.</p>
 
       <h3>Can one Tally company send to more than one endpoint?</h3>
       <p>Not from a single Agent install &mdash; one Agent instance targets one webhook URL. Run a second install pointed at a different connection if you need multiple targets.</p>
