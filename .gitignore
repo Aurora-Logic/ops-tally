@@ -7,5 +7,4 @@ out/
 100000/
 *.db
 *.db-journal
-docs/api.html
 publish.md
