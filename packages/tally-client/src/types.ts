@@ -69,6 +69,6 @@ export interface VoucherQueryOptions {
   toDate: Date;
   /** Only vouchers with AlterID strictly greater than this. */
   alterIdAbove?: number;
-  /** Restrict to a voucher type name, e.g. "Receipt". */
-  voucherType?: string;
+  /** Restrict to these voucher type names, e.g. ["Sales", "Receipt"]. Unset/empty means no restriction. */
+  voucherTypes?: string[];
 }

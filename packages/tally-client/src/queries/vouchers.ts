@@ -17,11 +17,10 @@ export function buildVouchersXML(company: string, opts: VoucherQueryOptions): st
       `<SYSTEM TYPE="Formulae" NAME="OpsAlterIdFilter">$AlterID &gt; ${Math.floor(opts.alterIdAbove)}</SYSTEM>`
     );
   }
-  if (opts.voucherType) {
+  if (opts.voucherTypes && opts.voucherTypes.length) {
     filters.push('OpsVchTypeFilter');
-    formulae.push(
-      `<SYSTEM TYPE="Formulae" NAME="OpsVchTypeFilter">$VoucherTypeName = "${esc(opts.voucherType)}"</SYSTEM>`
-    );
+    const conditions = opts.voucherTypes.map((t) => `$VoucherTypeName = "${esc(t)}"`).join(' OR ');
+    formulae.push(`<SYSTEM TYPE="Formulae" NAME="OpsVchTypeFilter">${conditions}</SYSTEM>`);
   }
 
   const filterLine = filters.length ? `<FILTER>${filters.join(', ')}</FILTER>` : '';
