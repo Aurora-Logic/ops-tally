@@ -9,9 +9,19 @@ export default function PollingTab({
   patch: (p: Partial<PublicConfig>) => Promise<void>;
 }) {
   const [note, setNote] = useState('');
+  const [voucherTypesDraft, setVoucherTypesDraft] = useState((config.voucherTypes ?? []).join(', '));
 
   const setInterval_ = (key: keyof PublicConfig['intervalsMinutes'], value: number) =>
     void patch({ intervalsMinutes: { ...config.intervalsMinutes, [key]: Math.max(1, value) } });
+
+  const commitVoucherTypes = () => {
+    const types = voucherTypesDraft
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setVoucherTypesDraft(types.join(', '));
+    void patch({ voucherTypes: types });
+  };
 
   return (
     <div className="max-w-lg space-y-4">
@@ -47,6 +57,22 @@ export default function PollingTab({
           value={config.voucherLookbackDays}
           onChange={(e) => void patch({ voucherLookbackDays: parseInt(e.target.value, 10) || 90 })}
         />
+      </label>
+
+      <label className="block">
+        <span className="text-sm text-slate-600">Voucher types to sync (comma-separated)</span>
+        <input
+          className="mt-1 w-full rounded border px-3 py-2 text-sm"
+          placeholder="Sales, Purchase, Receipt, Payment, Journal, Credit Note, Debit Note"
+          value={voucherTypesDraft}
+          onChange={(e) => setVoucherTypesDraft(e.target.value)}
+          onBlur={commitVoucherTypes}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Only these voucher types are fetched from Tally at all — everything else is filtered out before it
+          ever leaves Tally's own query. Empty means no restriction (every type syncs). Names must match Tally
+          exactly, e.g. "Credit Note".
+        </p>
       </label>
 
       <div className="flex items-center gap-3 pt-2">
@@ -88,6 +114,21 @@ export default function PollingTab({
           className="rounded border px-4 py-2 text-sm hover:bg-slate-100"
         >
           Full stock resync
+        </button>
+        <button
+          onClick={() => {
+            if (
+              window.confirm(
+                "Send this company's entire voucher history to your webhook as voucher.snapshot events? This is batched in date windows and may take a while on large companies."
+              )
+            ) {
+              void api.fullVoucherResync();
+              setNote('Full voucher resync queued — this can take a while on large histories');
+            }
+          }}
+          className="rounded border px-4 py-2 text-sm hover:bg-slate-100"
+        >
+          Full voucher resync
         </button>
         <span className="text-sm text-slate-500">{note}</span>
       </div>

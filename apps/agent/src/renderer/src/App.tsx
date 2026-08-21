@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api, type PublicConfig, type StatusPush } from './api';
+import ErrorBoundary from './ErrorBoundary';
 import ConnectionTab from './tabs/ConnectionTab';
 import WebhookTab from './tabs/WebhookTab';
 import PollingTab from './tabs/PollingTab';
 import DeliveriesTab from './tabs/DeliveriesTab';
+import SettingsTab from './tabs/SettingsTab';
 
-const TABS = ['Connection', 'Webhook', 'Polling', 'Deliveries'] as const;
+const TABS = ['Connection', 'Webhook', 'Polling', 'Deliveries', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 
 const DOT: Record<StatusPush['trayState'], string> = {
@@ -62,10 +64,13 @@ export default function App() {
       </nav>
 
       <main className="flex-1 overflow-y-auto p-6">
-        {tab === 'Connection' && <ConnectionTab config={config} patch={patch} />}
-        {tab === 'Webhook' && <WebhookTab config={config} patch={patch} />}
-        {tab === 'Polling' && <PollingTab config={config} patch={patch} />}
-        {tab === 'Deliveries' && <DeliveriesTab />}
+        <ErrorBoundary key={tab}>
+          {tab === 'Connection' && <ConnectionTab config={config} patch={patch} />}
+          {tab === 'Webhook' && <WebhookTab config={config} patch={patch} />}
+          {tab === 'Polling' && <PollingTab config={config} patch={patch} />}
+          {tab === 'Deliveries' && <DeliveriesTab />}
+          {tab === 'Settings' && <SettingsTab />}
+        </ErrorBoundary>
       </main>
 
       {status?.poller.message && (
