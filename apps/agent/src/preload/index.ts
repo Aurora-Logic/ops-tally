@@ -13,6 +13,9 @@ const api = {
   queueStats: () => ipcRenderer.invoke('queue:stats'),
   runPollNow: () => ipcRenderer.invoke('poll:runNow'),
   fullResync: () => ipcRenderer.invoke('poll:fullResync'),
+  fullVoucherResync: () => ipcRenderer.invoke('poll:fullVoucherResync'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
   onStatus: (cb: (status: unknown) => void) => {
     const listener = (_e: unknown, status: unknown) => cb(status);
     ipcRenderer.on('status', listener);

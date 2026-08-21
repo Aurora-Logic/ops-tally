@@ -80,6 +80,7 @@ if (!gotLock) {
         tallyPort: cfg.tallyPort,
         paused: cfg.paused,
         voucherLookbackDays: cfg.voucherLookbackDays,
+        voucherTypes: cfg.voucherTypes,
         intervalsMinutes: cfg.intervalsMinutes,
         webhookUrl: cfg.webhookUrl,
       };

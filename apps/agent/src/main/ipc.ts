@@ -11,6 +11,7 @@ import {
   updateConfig,
   type PublicConfig,
 } from './config.js';
+import { getSettings, setSettings, type GlobalSettings } from './settings/settings.js';
 
 export interface IpcDeps {
   db: AgentDb;
@@ -92,4 +93,13 @@ export function registerIpc(deps: IpcDeps): void {
     void poller.fullStockResync();
     return true;
   });
+
+  ipcMain.handle('poll:fullVoucherResync', () => {
+    void poller.fullVoucherResync();
+    return true;
+  });
+
+  ipcMain.handle('settings:get', () => getSettings());
+
+  ipcMain.handle('settings:set', (_e, patch: Partial<GlobalSettings>) => setSettings(patch));
 }
