@@ -4,6 +4,7 @@ export type TallyEventName =
   | 'voucher.created'
   | 'voucher.updated'
   | 'voucher.cancelled'
+  | 'voucher.snapshot'
   | 'stock.updated'
   | 'stock.snapshot'
   | 'ledger.created'

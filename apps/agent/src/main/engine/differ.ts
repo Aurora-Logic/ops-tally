@@ -59,8 +59,11 @@ function diffRecords<T>(
  * created vs updated vs cancelled against per-GUID snapshots.
  */
 export function diffVouchers(ctx: DifferContext, vouchers: VoucherJSON[]): EventEnvelope[] {
-  const events: EventEnvelope[] = [];
   const entity = 'vouchers';
+  const wasReset = guardWatermarkRegression(ctx, entity, Math.max(0, ...vouchers.map((v) => v.alterId)));
+  if (wasReset) ctx = { ...ctx, baseline: true };
+
+  const events: EventEnvelope[] = [];
   const tx = ctx.db.db.transaction(() => {
     for (const v of vouchers) {
       const key = v.guid || v.masterId;
@@ -144,6 +147,31 @@ function guardWatermarkRegression(ctx: DifferContext, entity: string, liveMax: n
     return true;
   }
   return false;
+}
+
+/**
+ * Chunk one date-window's voucher batch into voucher.snapshot events (manual
+ * full resync). Called once per window by fullVoucherResync — the resync
+ * walks multiple non-overlapping date windows to avoid one multi-year
+ * request, so chunk/total_chunks are scoped to this window's own batch.
+ */
+export function voucherSnapshotEvents(
+  ctx: DifferContext,
+  vouchers: VoucherJSON[],
+  chunkSize = 500
+): EventEnvelope[] {
+  const events: EventEnvelope[] = [];
+  for (let i = 0; i < vouchers.length; i += chunkSize) {
+    events.push(
+      makeEnvelope(
+        'voucher.snapshot',
+        { vouchers: vouchers.slice(i, i + chunkSize), chunk: Math.floor(i / chunkSize) + 1, total_chunks: Math.ceil(vouchers.length / chunkSize) },
+        ctx.company,
+        ctx.installId
+      )
+    );
+  }
+  return events;
 }
 
 /** Chunk a full stock set into stock.snapshot events (manual full resync). */
