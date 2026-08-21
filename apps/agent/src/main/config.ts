@@ -19,6 +19,10 @@ const configSchema = z.object({
     })
     .default({ vouchers: 2, stock: 10, ledgers: 30 }),
   voucherLookbackDays: z.number().min(1).max(3650).default(90),
+  /** Only these voucher types are fetched from Tally at all — filtered in the TDL query itself. */
+  voucherTypes: z
+    .array(z.string())
+    .default(['Sales', 'Purchase', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note']),
   paused: z.boolean().default(false),
   openAtLogin: z.boolean().default(true),
 });
