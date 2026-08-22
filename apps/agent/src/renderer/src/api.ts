@@ -19,6 +19,8 @@ export interface DeliveryRow {
   next_attempt_at: string | null;
   last_error: string | null;
   delivered_at: string | null;
+  /** Stock item names carried by this event's payload (stock.updated / stock.snapshot only). */
+  products?: string[];
 }
 
 export interface GlobalSettings {

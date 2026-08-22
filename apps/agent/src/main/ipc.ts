@@ -12,6 +12,7 @@ import {
   type PublicConfig,
 } from './config.js';
 import { getSettings, setSettings, type GlobalSettings } from './settings/settings.js';
+import { productNamesFrom } from './engine/events.js';
 
 export interface IpcDeps {
   db: AgentDb;
@@ -64,16 +65,26 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('secret:regenerate', () => regenerateSecret());
 
   ipcMain.handle('deliveries:list', () =>
-    db.recentEvents(100).map((row) => ({
-      id: row.id,
-      event: row.event,
-      created_at: row.created_at,
-      status: row.status,
-      attempts: row.attempts,
-      next_attempt_at: row.next_attempt_at,
-      last_error: row.last_error,
-      delivered_at: row.delivered_at,
-    }))
+    db.recentEvents(100).map((row) => {
+      let products: string[] | undefined;
+      try {
+        const envelope = JSON.parse(row.payload_json) as { payload?: unknown };
+        products = productNamesFrom(row.event, envelope.payload);
+      } catch {
+        products = undefined;
+      }
+      return {
+        id: row.id,
+        event: row.event,
+        created_at: row.created_at,
+        status: row.status,
+        attempts: row.attempts,
+        next_attempt_at: row.next_attempt_at,
+        last_error: row.last_error,
+        delivered_at: row.delivered_at,
+        products,
+      };
+    })
   );
 
   ipcMain.handle('events:retry', (_e, id: string) => {
