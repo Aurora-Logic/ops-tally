@@ -178,7 +178,10 @@ export function voucherSnapshotEvents(
 export function stockSnapshotEvents(
   ctx: DifferContext,
   items: StockItemJSON[],
-  chunkSize = 500
+  // Receiver upserts row-by-row (3 sequential DB round trips each); 500 rows
+  // over a slow link runs into the webhook's 30s response budget and gets
+  // aborted mid-flight. 100 keeps each chunk comfortably under it.
+  chunkSize = 100
 ): EventEnvelope[] {
   const events: EventEnvelope[] = [];
   for (let i = 0; i < items.length; i += chunkSize) {

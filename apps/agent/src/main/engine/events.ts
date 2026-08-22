@@ -35,3 +35,22 @@ export function makeEnvelope(
     payload,
   };
 }
+
+/**
+ * Product names carried by a stock event's payload, so the Deliveries tab can
+ * show what was actually sent rather than just the bare event type.
+ */
+export function productNamesFrom(event: string, payload: unknown): string[] | undefined {
+  if (event === 'stock.updated') {
+    const name = (payload as { name?: unknown } | null)?.name;
+    return typeof name === 'string' ? [name] : undefined;
+  }
+  if (event === 'stock.snapshot') {
+    const items = (payload as { items?: unknown } | null)?.items;
+    if (!Array.isArray(items)) return undefined;
+    return items
+      .map((item) => (item as { name?: unknown } | null)?.name)
+      .filter((name): name is string => typeof name === 'string');
+  }
+  return undefined;
+}
