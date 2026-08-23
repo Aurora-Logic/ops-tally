@@ -4,6 +4,9 @@ import {
   diffLedgers,
   diffStock,
   diffVouchers,
+  isWatermarkRegression,
+  ledgerSnapshotEvents,
+  maxAlterId,
   stockSnapshotEvents,
   voucherSnapshotEvents,
   type DifferContext,
@@ -53,7 +56,6 @@ export interface PollerSettings {
   tallyHost: string;
   tallyPort: number;
   paused: boolean;
-  voucherLookbackDays: number;
   /** Only these voucher types are fetched from Tally at all. Empty means no restriction. */
   voucherTypes: string[];
   intervalsMinutes: Record<PollEntity, number>;
@@ -93,7 +95,8 @@ export class Poller {
     this.deps = deps;
   }
 
-  start(): void {
+  /** Returns the initial pass, so a caller that needs it can await the first sweep. */
+  start(): Promise<void> {
     this.stop();
     this.stopped = false;
     const settings = this.deps.getSettings();
@@ -102,7 +105,7 @@ export class Poller {
       this.timers.push(setInterval(() => this.enqueuePoll(entity), minutes * 60_000));
     }
     // Kick off an immediate first pass.
-    this.pollAll();
+    return this.pollAll();
   }
 
   stop(): void {
@@ -132,6 +135,30 @@ export class Poller {
         const events = stockSnapshotEvents(ctx, items);
         for (const e of events) this.deps.db.enqueueEvent(e);
         if (events.length) this.deps.onEvents?.(events);
+      })
+      .catch((err) => this.reportError(err));
+    return this.chain;
+  }
+
+  /**
+   * Full ledger resync — emits chunked ledger.snapshot events for every
+   * ledger (parties included) regardless of diffs. Unlike vouchers there is no
+   * date dimension to walk: Tally returns the whole account list in one
+   * request, so this is a single fetch. Also advances the ledger watermark so
+   * a later poll doesn't re-baseline off a stale value.
+   */
+  fullLedgerResync(): Promise<void> {
+    this.chain = this.chain
+      .then(async () => {
+        const ctx = this.context(false);
+        if (!ctx) return;
+        const ledgers = await this.deps.client.getLedgers();
+        const events = ledgerSnapshotEvents(ctx, ledgers);
+        for (const e of events) this.deps.db.enqueueEvent(e);
+        if (events.length) this.deps.onEvents?.(events);
+
+        const maxAlter = maxAlterId(ledgers);
+        if (maxAlter > this.deps.db.getWatermark('ledgers')) this.deps.db.setWatermark('ledgers', maxAlter);
       })
       .catch((err) => this.reportError(err));
     return this.chain;
@@ -234,17 +261,11 @@ export class Poller {
     this.deps.onStatus?.({ state: 'polling' });
     try {
       let events: EventEnvelope[] = [];
+      let didReset = false;
       if (entity === 'vouchers') {
-        const watermark = this.deps.db.getWatermark('vouchers');
-        const to = new Date();
-        const from = new Date(Date.now() - settings.voucherLookbackDays * 24 * 3600 * 1000);
-        const vouchers = await this.deps.client.getVouchers({
-          fromDate: from,
-          toDate: to,
-          alterIdAbove: watermark > 0 ? watermark : undefined,
-          voucherTypes: settings.voucherTypes,
-        });
-        events = diffVouchers(ctx, vouchers);
+        const swept = await this.pollVouchers(ctx, settings);
+        events = swept.events;
+        didReset = swept.didReset;
       } else if (entity === 'stock') {
         const items = await this.deps.client.getStockItems();
         events = diffStock(ctx, items);
@@ -253,13 +274,89 @@ export class Poller {
         events = diffLedgers(ctx, ledgers);
       }
 
-      this.deps.db.setMeta(baselineKey, 'done');
+      // A reset wiped the baseline marker on purpose — leave it wiped.
+      if (!didReset) this.deps.db.setMeta(baselineKey, 'done');
       for (const e of events) this.deps.db.enqueueEvent(e);
       if (events.length) this.deps.onEvents?.(events);
       this.deps.onStatus?.({ state: 'idle', lastPollAt: new Date().toISOString() });
     } catch (err: any) {
       this.reportError(err);
     }
+  }
+
+  /**
+   * Poll vouchers across the company's whole history, one financial year per
+   * request.
+   *
+   * Why a walk rather than one dated request: Tally scopes a Voucher
+   * collection to the FINANCIAL YEAR containing the requested range, not to
+   * the range. Asking for 2018-04-01..2026-08-23 returns one year, and asking
+   * for a single day returns that day's whole year. There is no such thing as
+   * a narrow voucher fetch, so the only way to see every year is to ask for
+   * each one.
+   *
+   * Why that is affordable: the AlterID filter is applied by Tally, not here.
+   * Measured on a real company, one financial year of 17,144 vouchers is 82 MB
+   * unfiltered and 1.5 KB once `AlterID > watermark` is attached. Steady state
+   * is therefore N tiny responses. It still costs Tally real scan time per year
+   * (~9s on that company even when nothing matches), which is why the default
+   * voucher interval is minutes, not seconds, and why the requests are spaced.
+   *
+   * Requests run strictly sequentially with a pause between them, on top of
+   * the poller's own serialized chain — a multi-year sweep must not hammer
+   * Tally's single-threaded gateway.
+   */
+  private async pollVouchers(
+    ctx: DifferContext,
+    settings: PollerSettings
+  ): Promise<{ events: EventEnvelope[]; didReset: boolean }> {
+    const watermark = this.deps.db.getWatermark('vouchers');
+    const toDate = new Date();
+    const fromDate = await this.resolveVoucherResyncStart(settings, toDate);
+    const windows = dateWindows(fromDate, toDate, RESYNC_WINDOW_MONTHS);
+
+    const events: EventEnvelope[] = [];
+    let liveMax = 0;
+
+    for (let i = 0; i < windows.length; i++) {
+      const { from, to } = windows[i];
+      const vouchers = await this.deps.client.getVouchers({
+        fromDate: from,
+        toDate: to,
+        alterIdAbove: watermark > 0 ? watermark : undefined,
+        voucherTypes: settings.voucherTypes,
+      });
+      const batchMax = maxAlterId(vouchers);
+      if (batchMax > liveMax) liveMax = batchMax;
+      // `windowed`: this window owns neither the regression guard nor the
+      // watermark — see diffVouchers for why both are wrong per window.
+      events.push(...diffVouchers(ctx, vouchers, { windowed: true }));
+      if (i < windows.length - 1) await sleep(RESYNC_BATCH_DELAY_MS);
+    }
+
+    /*
+     * The regression check, asked once, about the aggregate: a live max below
+     * our stored watermark means the company was restored from a backup or
+     * rewritten, and our snapshots describe books that no longer exist.
+     * Discard this sweep's events rather than delivering a flood of
+     * "created" for records the receiver already has, and clear the entity so
+     * the next poll re-baselines silently. Checked after the walk because the
+     * true company max is not known until every year has been asked.
+     */
+    if (isWatermarkRegression(this.deps.db, 'vouchers', liveMax)) {
+      this.deps.db.clearEntity('vouchers');
+      // didReset matters: clearEntity drops the `baseline:vouchers` marker, and
+      // the caller must NOT put it back. If it did, the next poll would run in
+      // non-baseline mode against snapshots we just emptied, and every voucher
+      // in the company would look new — the exact flood this guard exists to
+      // prevent, arriving one poll later.
+      return { events: [], didReset: true };
+    }
+
+    if (liveMax > this.deps.db.getWatermark('vouchers')) {
+      this.deps.db.setWatermark('vouchers', liveMax);
+    }
+    return { events, didReset: false };
   }
 
   /** Cheap liveness probe (company list only) used while no webhook is set. */

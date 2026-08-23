@@ -7,6 +7,28 @@ function hashOf(obj: unknown): string {
   return createHash('sha256').update(JSON.stringify(obj)).digest('hex');
 }
 
+/**
+ * Highest AlterID in a batch, by loop rather than `Math.max(0, ...list)`.
+ * Spreading passes one argument per element, and a financial year of vouchers
+ * is comfortably past the ~100k argument limit that throws RangeError.
+ */
+export function maxAlterId(records: readonly { alterId: number }[]): number {
+  let max = 0;
+  for (const r of records) if (r.alterId > max) max = r.alterId;
+  return max;
+}
+
+/**
+ * True when the live max AlterID has fallen BELOW the stored watermark — the
+ * company was restored from a backup or rewritten. Exposed so the financial-
+ * year walker can ask the question once, about the aggregate, rather than once
+ * per window.
+ */
+export function isWatermarkRegression(db: AgentDb, entity: string, liveMax: number): boolean {
+  const stored = db.getWatermark(entity);
+  return stored > 0 && liveMax > 0 && liveMax < stored;
+}
+
 export interface DifferContext {
   db: AgentDb;
   company: string;
@@ -57,10 +79,30 @@ function diffRecords<T>(
 /**
  * Vouchers: ALTERID watermark upstream narrows the fetch; here we classify
  * created vs updated vs cancelled against per-GUID snapshots.
+ *
+ * `windowed` says this batch is one window of a multi-request walk over the
+ * company's financial years, and that the CALLER owns both the regression
+ * guard and the watermark. Both are wrong to do per window:
+ *
+ * - The guard asks "is the live max AlterID below our stored watermark?" That
+ *   is only meaningful about the whole company. An old year's batch always has
+ *   a lower max, so letting it answer would wipe and re-baseline on every poll
+ *   and the watermark would never stick.
+ * - Advancing the watermark per window would strand the years not yet walked:
+ *   if the sweep fails at year four of eight, a watermark already moved to the
+ *   current year's max means the next poll skips changes in years five to
+ *   eight forever. The walker advances it once, only after every year lands.
+ *
+ * See Poller.pollVouchers.
  */
-export function diffVouchers(ctx: DifferContext, vouchers: VoucherJSON[]): EventEnvelope[] {
+export function diffVouchers(
+  ctx: DifferContext,
+  vouchers: VoucherJSON[],
+  opts: { windowed?: boolean } = {}
+): EventEnvelope[] {
   const entity = 'vouchers';
-  const wasReset = guardWatermarkRegression(ctx, entity, Math.max(0, ...vouchers.map((v) => v.alterId)));
+  const wasReset =
+    opts.windowed === true ? false : guardWatermarkRegression(ctx, entity, maxAlterId(vouchers));
   if (wasReset) ctx = { ...ctx, baseline: true };
 
   const events: EventEnvelope[] = [];
@@ -90,8 +132,10 @@ export function diffVouchers(ctx: DifferContext, vouchers: VoucherJSON[]): Event
   });
   tx();
 
-  const maxAlter = Math.max(0, ...vouchers.map((v) => v.alterId));
-  if (maxAlter > ctx.db.getWatermark(entity)) ctx.db.setWatermark(entity, maxAlter);
+  if (opts.windowed !== true) {
+    const maxAlter = maxAlterId(vouchers);
+    if (maxAlter > ctx.db.getWatermark(entity)) ctx.db.setWatermark(entity, maxAlter);
+  }
   return events;
 }
 
@@ -100,7 +144,7 @@ export function diffVouchers(ctx: DifferContext, vouchers: VoucherJSON[]): Event
  * computed value, so the item's ALTERID does not move when a voucher changes it.
  */
 export function diffStock(ctx: DifferContext, items: StockItemJSON[]): EventEnvelope[] {
-  const wasReset = guardWatermarkRegression(ctx, 'stock', Math.max(0, ...items.map((i) => i.alterId)));
+  const wasReset = guardWatermarkRegression(ctx, 'stock', maxAlterId(items));
   if (wasReset) ctx = { ...ctx, baseline: true };
   const events = diffRecords(
     ctx,
@@ -111,24 +155,50 @@ export function diffStock(ctx: DifferContext, items: StockItemJSON[]): EventEnve
     null, // new stock items also arrive as stock.updated — consumers upsert
     'stock.updated'
   );
-  const maxAlter = Math.max(0, ...items.map((i) => i.alterId));
+  const maxAlter = maxAlterId(items);
   if (maxAlter > ctx.db.getWatermark('stock')) ctx.db.setWatermark('stock', maxAlter);
   return events;
 }
 
+/**
+ * Ledgers (parties are the ones under Sundry Debtors/Creditors). The hash
+ * covers the party detail fields as well as the identity ones — closingBalance
+ * especially, which Tally computes from the vouchers and therefore changes
+ * WITHOUT the ledger's AlterID moving (same trap as stock's closing quantity).
+ * Leaving it out of the hash would ship an outstanding figure that only ever
+ * refreshed when someone renamed the account.
+ */
 export function diffLedgers(ctx: DifferContext, ledgers: LedgerJSON[]): EventEnvelope[] {
-  const wasReset = guardWatermarkRegression(ctx, 'ledgers', Math.max(0, ...ledgers.map((l) => l.alterId)));
+  const wasReset = guardWatermarkRegression(ctx, 'ledgers', maxAlterId(ledgers));
   if (wasReset) ctx = { ...ctx, baseline: true };
   const events = diffRecords(
     ctx,
     'ledgers',
     ledgers,
     (l) => l.guid || l.masterId || l.name,
-    (l) => ({ name: l.name, parent: l.parent, gstin: l.gstin }),
+    (l) => ({
+      name: l.name,
+      parent: l.parent,
+      gstin: l.gstin,
+      gstRegistrationType: l.gstRegistrationType,
+      openingBalance: l.openingBalance,
+      closingBalance: l.closingBalance,
+      address: l.address,
+      state: l.state,
+      country: l.country,
+      pincode: l.pincode,
+      contactPerson: l.contactPerson,
+      phone: l.phone,
+      mobile: l.mobile,
+      email: l.email,
+      creditLimit: l.creditLimit,
+      creditPeriodDays: l.creditPeriodDays,
+      isBillWiseOn: l.isBillWiseOn,
+    }),
     'ledger.created',
     'ledger.updated'
   );
-  const maxAlter = Math.max(0, ...ledgers.map((l) => l.alterId));
+  const maxAlter = maxAlterId(ledgers);
   if (maxAlter > ctx.db.getWatermark('ledgers')) ctx.db.setWatermark('ledgers', maxAlter);
   return events;
 }
@@ -166,6 +236,34 @@ export function voucherSnapshotEvents(
       makeEnvelope(
         'voucher.snapshot',
         { vouchers: vouchers.slice(i, i + chunkSize), chunk: Math.floor(i / chunkSize) + 1, total_chunks: Math.ceil(vouchers.length / chunkSize) },
+        ctx.company,
+        ctx.installId
+      )
+    );
+  }
+  return events;
+}
+
+/**
+ * Chunk the full ledger list into ledger.snapshot events (manual full resync).
+ * Ledger rows are small and the receiver upserts row-by-row, so this uses the
+ * same conservative chunk size as stock rather than the voucher one.
+ */
+export function ledgerSnapshotEvents(
+  ctx: DifferContext,
+  ledgers: LedgerJSON[],
+  chunkSize = 100
+): EventEnvelope[] {
+  const events: EventEnvelope[] = [];
+  for (let i = 0; i < ledgers.length; i += chunkSize) {
+    events.push(
+      makeEnvelope(
+        'ledger.snapshot',
+        {
+          ledgers: ledgers.slice(i, i + chunkSize),
+          chunk: Math.floor(i / chunkSize) + 1,
+          total_chunks: Math.ceil(ledgers.length / chunkSize),
+        },
         ctx.company,
         ctx.installId
       )

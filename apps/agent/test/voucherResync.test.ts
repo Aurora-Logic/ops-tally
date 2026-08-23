@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { CompanyInfo, VoucherJSON, VoucherQueryOptions } from '@opstally/tally-client';
 import { AgentDb } from '../src/main/engine/db.js';
 import { Poller, type PollerSettings } from '../src/main/engine/poller.js';
+import { makeVoucher } from './support/voucher.js';
+
+/** Tally's YYYYMMDD from local components — the same reading fmtTallyDate takes. */
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function settings(over: Partial<PollerSettings> = {}): PollerSettings {
   return {
@@ -9,9 +15,8 @@ function settings(over: Partial<PollerSettings> = {}): PollerSettings {
     tallyHost: 'localhost',
     tallyPort: 9000,
     paused: false,
-    voucherLookbackDays: 90,
     voucherTypes: [],
-    intervalsMinutes: { vouchers: 2, stock: 10, ledgers: 30 },
+    intervalsMinutes: { vouchers: 15, stock: 10, ledgers: 30 },
     webhookUrl: 'http://example.test/webhook',
     ...over,
   };
@@ -31,20 +36,13 @@ describe('Poller.fullVoucherResync', () => {
         requestedWindows.push({ fromDate: opts.fromDate, toDate: opts.toDate });
         const n = requestedWindows.length;
         return [
-          {
+          makeVoucher({
             masterId: `m-${n}`,
             alterId: 100 + n,
             guid: `g-${n}`,
             date: '20240315',
-            voucherType: 'Sales',
             voucherNumber: `INV-${n}`,
-            party: 'Acme',
-            narration: '',
-            isCancelled: false,
-            amount: -100,
-            ledgerEntries: [],
-            inventoryEntries: [],
-          },
+          }),
         ];
       },
     } as any;
@@ -64,7 +62,11 @@ describe('Poller.fullVoucherResync', () => {
     // exactly at the company's reported books-begin date, and every window
     // butts up against the next with no gap and no overlap.
     expect(requestedWindows.length).toBeGreaterThan(0);
-    expect(requestedWindows[0].fromDate.toISOString().slice(0, 10)).toBe('2024-03-01');
+    // Compared in LOCAL components, not via toISOString(): the poller builds
+    // these dates locally and fmtTallyDate reads them back locally, so the
+    // round-trip to Tally is correct. Asserting in UTC shifts the day backwards
+    // in any timezone east of Greenwich (IST is +5:30) and fails a correct poller.
+    expect(localYmd(requestedWindows[0].fromDate)).toBe('20240301');
     for (let i = 1; i < requestedWindows.length; i++) {
       const prevTo = requestedWindows[i - 1].toDate.getTime();
       const curFrom = requestedWindows[i].fromDate.getTime();
@@ -74,7 +76,10 @@ describe('Poller.fullVoucherResync', () => {
     expect(enqueued).toHaveLength(requestedWindows.length);
     expect(enqueued.every((e) => e.event === 'voucher.snapshot')).toBe(true);
     expect(db.getWatermark('vouchers')).toBe(100 + requestedWindows.length);
-  });
+    // 30s, not the 5s default: the resync deliberately pauses between window
+    // requests so Tally's single-threaded gateway is not hammered, and a
+    // multi-year fallback walks enough windows to exceed the default.
+  }, 30_000);
 
   it('falls back to a bounded lookback when Tally reports no books-begin date', async () => {
     const db = new AgentDb(':memory:');
@@ -102,7 +107,7 @@ describe('Poller.fullVoucherResync', () => {
     // rather than pinning the exact constant.
     expect(spanYears).toBeGreaterThan(10);
     expect(spanYears).toBeLessThan(20);
-  });
+  }, 30_000);
 
   it('does nothing when no company is configured', async () => {
     const db = new AgentDb(':memory:');

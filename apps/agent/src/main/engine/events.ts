@@ -9,6 +9,7 @@ export type TallyEventName =
   | 'stock.snapshot'
   | 'ledger.created'
   | 'ledger.updated'
+  | 'ledger.snapshot'
   | 'ping';
 
 export interface EventEnvelope {

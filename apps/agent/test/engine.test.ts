@@ -7,22 +7,9 @@ import { diffStock, diffVouchers, type DifferContext } from '../src/main/engine/
 import { makeEnvelope } from '../src/main/engine/events.js';
 import { Dispatcher } from '../src/main/dispatcher/sender.js';
 import { generateSecret, signBody } from '../src/main/dispatcher/signer.js';
+import { makeVoucher } from './support/voucher.js';
 
-const voucher = (over: Partial<VoucherJSON> = {}): VoucherJSON => ({
-  masterId: '501',
-  alterId: 100,
-  guid: 'g-501',
-  date: '20260801',
-  voucherType: 'Sales',
-  voucherNumber: 'INV-1',
-  party: 'Acme',
-  narration: '',
-  isCancelled: false,
-  amount: -100,
-  ledgerEntries: [],
-  inventoryEntries: [],
-  ...over,
-});
+const voucher = (over: Partial<VoucherJSON> = {}): VoucherJSON => makeVoucher(over);
 
 const stockItem = (over: Partial<StockItemJSON> = {}): StockItemJSON => ({
   masterId: '101',
