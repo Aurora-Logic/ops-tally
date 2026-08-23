@@ -49,17 +49,6 @@ export default function PollingTab({
       </div>
 
       <label className="block">
-        <span className="text-sm text-slate-600">Voucher lookback window (days)</span>
-        <input
-          type="number"
-          min={1}
-          className="mt-1 w-32 rounded border px-3 py-2 text-sm"
-          value={config.voucherLookbackDays}
-          onChange={(e) => void patch({ voucherLookbackDays: parseInt(e.target.value, 10) || 90 })}
-        />
-      </label>
-
-      <label className="block">
         <span className="text-sm text-slate-600">Voucher types to sync (comma-separated)</span>
         <input
           className="mt-1 w-full rounded border px-3 py-2 text-sm"
@@ -94,7 +83,7 @@ export default function PollingTab({
         </label>
       </div>
 
-      <div className="flex items-center gap-3 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-3 border-t pt-4">
         <button
           onClick={() => {
             void api.runPollNow();
@@ -129,6 +118,21 @@ export default function PollingTab({
           className="rounded border px-4 py-2 text-sm hover:bg-slate-100"
         >
           Full voucher resync
+        </button>
+        <button
+          onClick={() => {
+            if (
+              window.confirm(
+                'Send every ledger — parties included, with balances and contact details — to your webhook as ledger.snapshot events?'
+              )
+            ) {
+              void api.fullLedgerResync();
+              setNote('Full ledger resync queued');
+            }
+          }}
+          className="rounded border px-4 py-2 text-sm hover:bg-slate-100"
+        >
+          Full ledger resync
         </button>
         <span className="text-sm text-slate-500">{note}</span>
       </div>

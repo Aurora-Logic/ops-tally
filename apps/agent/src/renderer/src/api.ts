@@ -4,7 +4,6 @@ export interface PublicConfig {
   tallyPort: number;
   company: string;
   intervalsMinutes: { vouchers: number; stock: number; ledgers: number };
-  voucherLookbackDays: number;
   voucherTypes: string[];
   paused: boolean;
   openAtLogin: boolean;
@@ -48,6 +47,7 @@ export interface OpsTallyApi {
   runPollNow(): Promise<boolean>;
   fullResync(): Promise<boolean>;
   fullVoucherResync(): Promise<boolean>;
+  fullLedgerResync(): Promise<boolean>;
   getSettings(): Promise<GlobalSettings>;
   setSettings(patch: Partial<GlobalSettings>): Promise<GlobalSettings>;
   onStatus(cb: (status: StatusPush) => void): () => void;

@@ -14,6 +14,7 @@ const api = {
   runPollNow: () => ipcRenderer.invoke('poll:runNow'),
   fullResync: () => ipcRenderer.invoke('poll:fullResync'),
   fullVoucherResync: () => ipcRenderer.invoke('poll:fullVoucherResync'),
+  fullLedgerResync: () => ipcRenderer.invoke('poll:fullLedgerResync'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
   onStatus: (cb: (status: unknown) => void) => {

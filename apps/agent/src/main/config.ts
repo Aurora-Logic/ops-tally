@@ -11,14 +11,21 @@ const configSchema = z.object({
   tallyHost: z.string().default('localhost'),
   tallyPort: z.number().int().min(1).max(65535).default(9000),
   company: z.string().default(''),
+  /*
+   * Vouchers default to 15 minutes, not 2. A voucher poll is now one request
+   * per financial year of the company's history (Tally cannot scope a voucher
+   * collection more finely than a year), and each year costs Tally real scan
+   * time even when the AlterID filter matches nothing — measured at ~9s on a
+   * company with eight years of books, so a sweep is over a minute of work.
+   * At two minutes Tally would spend most of its life answering us.
+   */
   intervalsMinutes: z
     .object({
-      vouchers: z.number().min(1).default(2),
+      vouchers: z.number().min(1).default(15),
       stock: z.number().min(1).default(10),
       ledgers: z.number().min(1).default(30),
     })
-    .default({ vouchers: 2, stock: 10, ledgers: 30 }),
-  voucherLookbackDays: z.number().min(1).max(3650).default(90),
+    .default({ vouchers: 15, stock: 10, ledgers: 30 }),
   /** Only these voucher types are fetched from Tally at all — filtered in the TDL query itself. */
   voucherTypes: z
     .array(z.string())

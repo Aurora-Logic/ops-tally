@@ -110,6 +110,11 @@ export function registerIpc(deps: IpcDeps): void {
     return true;
   });
 
+  ipcMain.handle('poll:fullLedgerResync', () => {
+    void poller.fullLedgerResync();
+    return true;
+  });
+
   ipcMain.handle('settings:get', () => getSettings());
 
   ipcMain.handle('settings:set', (_e, patch: Partial<GlobalSettings>) => setSettings(patch));

@@ -79,7 +79,6 @@ if (!gotLock) {
         tallyHost: cfg.tallyHost,
         tallyPort: cfg.tallyPort,
         paused: cfg.paused,
-        voucherLookbackDays: cfg.voucherLookbackDays,
         voucherTypes: cfg.voucherTypes,
         intervalsMinutes: cfg.intervalsMinutes,
         webhookUrl: cfg.webhookUrl,
@@ -154,7 +153,7 @@ if (!gotLock) {
 
     registerIpc({ db, client, poller, dispatcher, broadcastStatus });
 
-    poller.start();
+    void poller.start();
     dispatcher.start();
     broadcastStatus();
     void initAutoUpdate();
