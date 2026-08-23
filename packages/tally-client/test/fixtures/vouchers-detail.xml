@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Trimmed from real Tally responses (two live companies), keeping the exact tag
+  names, nesting and value shapes observed. Notably:
+    - BASICORDERTERMS / BASICBUYERADDRESS are simple lists whose entries repeat
+      inside the .LIST node.
+    - BANKALLOCATIONS.LIST holds its fields DIRECTLY, with no repeated
+      <BANKALLOCATIONS> child element.
+    - The two companies populate disjoint field sets, which is why both shapes
+      are represented here.
+-->
+<ENVELOPE>
+  <BODY>
+    <DATA>
+      <COLLECTION>
+
+        <VOUCHER VCHTYPE="Gst Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
+          <MASTERID>9001</MASTERID>
+          <ALTERID>4410</ALTERID>
+          <GUID>aaaa1111-0000-0000-0000-000000009001</GUID>
+          <DATE>20240401</DATE>
+          <VOUCHERTYPENAME>Gst Sales</VOUCHERTYPENAME>
+          <VOUCHERNUMBER>IN/2425/00001</VOUCHERNUMBER>
+          <PARTYLEDGERNAME>Fatema Trading Co (Dwarka)</PARTYLEDGERNAME>
+          <NARRATION>Material collected from warehouse</NARRATION>
+          <ISCANCELLED>No</ISCANCELLED>
+          <AMOUNT>-3842.00</AMOUNT>
+          <BASICSHIPPEDBY>Harish / Rutik</BASICSHIPPEDBY>
+          <BASICSHIPDOCUMENTNO>ORD-INN/24_25/00012</BASICSHIPDOCUMENTNO>
+          <BASICBUYERNAME>Fatema Trading Co (Dwarka)</BASICBUYERNAME>
+          <CONSIGNEEMAILINGNAME>Fatema Trading Co (Dwarka)</CONSIGNEEMAILINGNAME>
+          <CONSIGNEESTATENAME>Gujarat</CONSIGNEESTATENAME>
+          <PLACEOFSUPPLY>Gujarat</PLACEOFSUPPLY>
+          <REFERENCE/>
+          <BASICORDERREF/>
+          <BASICDUEDATEOFPYMT/>
+          <ALLLEDGERENTRIES.LIST>
+            <LEDGERNAME>Fatema Trading Co (Dwarka)</LEDGERNAME>
+            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+            <AMOUNT>3842.00</AMOUNT>
+            <BANKALLOCATIONS.LIST>      </BANKALLOCATIONS.LIST>
+          </ALLLEDGERENTRIES.LIST>
+        </VOUCHER>
+
+        <VOUCHER VCHTYPE="Solar Module Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
+          <MASTERID>11279</MASTERID>
+          <ALTERID>12557</ALTERID>
+          <GUID>bbbb2222-0000-0000-0000-000000011279</GUID>
+          <DATE>20210529</DATE>
+          <VOUCHERTYPENAME>Solar Module Sales</VOUCHERTYPENAME>
+          <VOUCHERNUMBER>PSM/21-22/1</VOUCHERNUMBER>
+          <PARTYLEDGERNAME>Manharbhai Karshanbhai Zala</PARTYLEDGERNAME>
+          <ISCANCELLED>No</ISCANCELLED>
+          <AMOUNT>-21000.00</AMOUNT>
+          <REFERENCE>P/MKR/0322/341/01</REFERENCE>
+          <REFERENCEDATE>20210714</REFERENCEDATE>
+          <BASICORDERREF>Lead 9480</BASICORDERREF>
+          <BASICPURCHASEORDERNO>PIXM/21-22/05</BASICPURCHASEORDERNO>
+          <BASICORDERDATE>20210713</BASICORDERDATE>
+          <BASICDUEDATEOFPYMT>100% Advance Payment</BASICDUEDATEOFPYMT>
+          <BASICSHIPVESSELNO>GJ03AZ6791</BASICSHIPVESSELNO>
+          <BASICFINALDESTINATION>Ludhiyana</BASICFINALDESTINATION>
+          <BASICSHIPPEDBY/>
+          <BASICBUYERNAME>Manharbhai Karshanbhai Zala</BASICBUYERNAME>
+          <PARTYMAILINGNAME>Manharbhai Karshanbhai Zala</PARTYMAILINGNAME>
+          <PARTYGSTIN>24BBDPG5288D1ZV</PARTYGSTIN>
+          <STATENAME>Gujarat</STATENAME>
+          <COUNTRYOFRESIDENCE>India</COUNTRYOFRESIDENCE>
+          <PLACEOFSUPPLY>Gujarat</PLACEOFSUPPLY>
+          <CONSIGNEEMAILINGNAME>Manharbhai Karshanbhai Zala</CONSIGNEEMAILINGNAME>
+          <CONSIGNEESTATENAME>Gujarat</CONSIGNEESTATENAME>
+          <CONSIGNEEPINCODE>362530</CONSIGNEEPINCODE>
+          <CONSIGNEEGSTIN>24BBDPG5288D1ZV</CONSIGNEEGSTIN>
+          <BASICBUYERADDRESS.LIST TYPE="String">
+            <BASICBUYERADDRESS>Village : Khapat</BASICBUYERADDRESS>
+            <BASICBUYERADDRESS>Ta. Porbandar</BASICBUYERADDRESS>
+          </BASICBUYERADDRESS.LIST>
+          <BASICORDERTERMS.LIST TYPE="String">
+            <BASICORDERTERMS>1. Ex-Works</BASICORDERTERMS>
+            <BASICORDERTERMS>2. Our risk and responsibility ceases as soon as</BASICORDERTERMS>
+            <BASICORDERTERMS>the goods leave our premises.</BASICORDERTERMS>
+          </BASICORDERTERMS.LIST>
+        </VOUCHER>
+
+        <VOUCHER VCHTYPE="Receipt" ACTION="Create">
+          <MASTERID>7300</MASTERID>
+          <ALTERID>9120</ALTERID>
+          <GUID>cccc3333-0000-0000-0000-000000007300</GUID>
+          <DATE>20220331</DATE>
+          <VOUCHERTYPENAME>Receipt</VOUCHERTYPENAME>
+          <VOUCHERNUMBER>RCPT/290</VOUCHERNUMBER>
+          <PARTYLEDGERNAME>Rajesh Sharma</PARTYLEDGERNAME>
+          <ISCANCELLED>No</ISCANCELLED>
+          <AMOUNT>6313.00</AMOUNT>
+          <ALLLEDGERENTRIES.LIST>
+            <LEDGERNAME>Bank of Baroda</LEDGERNAME>
+            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+            <AMOUNT>-6313.00</AMOUNT>
+            <BANKALLOCATIONS.LIST>
+              <DATE>20220331</DATE>
+              <INSTRUMENTDATE>20220331</INSTRUMENTDATE>
+              <NAME>1d0d5431-b4cc-4ae6-a016-a2487bb90a9b</NAME>
+              <TRANSACTIONTYPE>Cheque/DD</TRANSACTIONTYPE>
+              <BANKNAME>State Bank of India (India)</BANKNAME>
+              <PAYMENTFAVOURING>Rajesh Sharma</PAYMENTFAVOURING>
+              <INSTRUMENTNUMBER>328650</INSTRUMENTNUMBER>
+              <PAYMENTMODE>Transacted</PAYMENTMODE>
+            </BANKALLOCATIONS.LIST>
+          </ALLLEDGERENTRIES.LIST>
+          <ALLLEDGERENTRIES.LIST>
+            <LEDGERNAME>Rajesh Sharma</LEDGERNAME>
+            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+            <AMOUNT>6313.00</AMOUNT>
+            <BANKALLOCATIONS.LIST>      </BANKALLOCATIONS.LIST>
+          </ALLLEDGERENTRIES.LIST>
+        </VOUCHER>
+
+      </COLLECTION>
+    </DATA>
+  </BODY>
+</ENVELOPE>

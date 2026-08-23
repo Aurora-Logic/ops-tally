@@ -43,3 +43,15 @@ export function parseAlterId(val: any): number {
   const n = parseInt(text(val).trim(), 10);
   return Number.isNaN(n) ? 0 : n;
 }
+
+/** Parse a Tally money field like "-12,500.00" into a number. */
+export function parseAmount(val: any): number {
+  const s = text(val).trim();
+  if (!s) return 0;
+  return parseFloat(s.replace(/,/g, '')) || 0;
+}
+
+/** "Yes"/"No" flag, whichever shape it arrived in. */
+export function parseBool(item: any, name: string): boolean {
+  return textAttr(item, name).toLowerCase() === 'yes';
+}

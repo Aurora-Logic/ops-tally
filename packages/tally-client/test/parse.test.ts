@@ -6,6 +6,7 @@ import { parseStringPromise } from 'xml2js';
 import { parseStockCollection } from '../src/parse/stock.js';
 import { parseVoucherCollection } from '../src/parse/vouchers.js';
 import { parseSalesRates } from '../src/parse/salesRates.js';
+import { parseLedgerCollection } from '../src/parse/ledgers.js';
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const load = async (name: string) =>
@@ -79,5 +80,126 @@ describe('parseSalesRates', () => {
     // INVENTORYENTRIES.LIST/string shape the other fixture covers.
     const rates = parseSalesRates(await load('sales-rates-invoice-mode.xml'));
     expect(rates.get('twin wheel plate 40mm')).toBe(196);
+  });
+});
+
+describe('parseLedgerCollection', () => {
+  it('parses party detail — balances, address, contact, credit terms', async () => {
+    const ledgers = parseLedgerCollection(await load('ledgers.xml'));
+    expect(ledgers).toHaveLength(3);
+
+    const [acme, bharat, bank] = ledgers;
+
+    expect(acme.name).toBe('Acme Traders');
+    expect(acme.parent).toBe('Sundry Debtors');
+    expect(acme.masterId).toBe('412');
+    expect(acme.alterId).toBe(3180);
+    expect(acme.gstin).toBe('27AABCU9603R1ZM');
+    expect(acme.gstRegistrationType).toBe('Regular');
+    // Tally sign convention: debit positive, credit negative. Thousands
+    // separators are Indian-grouped and must survive.
+    expect(acme.openingBalance).toBe(-25000);
+    expect(acme.closingBalance).toBe(184250.5);
+    expect(acme.address).toEqual(['Unit 4, Sunmill Compound', 'Lower Parel West', 'Mumbai']);
+    expect(acme.state).toBe('Maharashtra');
+    expect(acme.country).toBe('India');
+    expect(acme.pincode).toBe('400018');
+    expect(acme.contactPerson).toBe('Ravi Menon');
+    expect(acme.phone).toBe('022-24001188');
+    expect(acme.mobile).toBe('9820011223');
+    expect(acme.email).toBe('accounts@acmetraders.in');
+    expect(acme.creditLimit).toBe(500000);
+    expect(acme.creditPeriodDays).toBe(45); // "45 Days" -> numeric part
+    expect(acme.isBillWiseOn).toBe(true);
+
+    // Single-line address still lands as a one-element array.
+    expect(bharat.parent).toBe('Sundry Creditors');
+    expect(bharat.closingBalance).toBe(-62400);
+    expect(bharat.address).toEqual(['Plot 12, Peenya Industrial Area']);
+    expect(bharat.isBillWiseOn).toBe(false);
+
+    // Non-party ledgers come through the same collection — consumers filter on
+    // `parent`. Absent fields default rather than blowing up.
+    expect(bank.parent).toBe('Bank Accounts');
+    expect(bank.closingBalance).toBe(905432.1);
+    expect(bank.gstin).toBe('');
+    expect(bank.address).toEqual([]);
+    expect(bank.creditPeriodDays).toBe(0);
+    expect(bank.isBillWiseOn).toBe(false);
+  });
+
+  it('returns an empty list when the collection is absent', () => {
+    expect(parseLedgerCollection({})).toEqual([]);
+    expect(parseLedgerCollection({ ENVELOPE: { BODY: { DATA: { COLLECTION: {} } } } })).toEqual([]);
+  });
+});
+
+describe('parseVoucher order, terms, dispatch and settlement detail', () => {
+  it('reads the dispatch fields one company fills and the order/terms fields the other does', async () => {
+    const [gstSales, solar] = parseVoucherCollection(await load('vouchers-detail.xml'));
+
+    // Company A records who carried the goods, and nothing about order terms.
+    expect(gstSales.dispatchedThrough).toBe('Harish / Rutik');
+    expect(gstSales.dispatchDocNo).toBe('ORD-INN/24_25/00012');
+    expect(gstSales.buyerName).toBe('Fatema Trading Co (Dwarka)');
+    expect(gstSales.consigneeName).toBe('Fatema Trading Co (Dwarka)');
+    expect(gstSales.placeOfSupply).toBe('Gujarat');
+    // Present in the XML but empty: "this company does not record that".
+    expect(gstSales.reference).toBe('');
+    expect(gstSales.orderRef).toBe('');
+    expect(gstSales.paymentTerms).toBe('');
+    expect(gstSales.deliveryTerms).toEqual([]);
+
+    // Company B is the exact inverse — order refs and terms, no carrier.
+    expect(solar.reference).toBe('P/MKR/0322/341/01');
+    expect(solar.referenceDate).toBe('20210714');
+    expect(solar.orderRef).toBe('Lead 9480');
+    expect(solar.buyerOrderNumber).toBe('PIXM/21-22/05');
+    expect(solar.buyerOrderDate).toBe('20210713');
+    expect(solar.paymentTerms).toBe('100% Advance Payment');
+    expect(solar.deliveryTerms).toEqual([
+      '1. Ex-Works',
+      '2. Our risk and responsibility ceases as soon as',
+      'the goods leave our premises.',
+    ]);
+    expect(solar.destination).toBe('Ludhiyana');
+    // Companies commonly put the vehicle in the vessel field.
+    expect(solar.vehicleNumber).toBe('GJ03AZ6791');
+    expect(solar.buyerAddress).toEqual(['Village : Khapat', 'Ta. Porbandar']);
+    expect(solar.partyGstin).toBe('24BBDPG5288D1ZV');
+    expect(solar.partyState).toBe('Gujarat');
+    expect(solar.consigneePincode).toBe('362530');
+    expect(solar.consigneeGstin).toBe('24BBDPG5288D1ZV');
+    expect(solar.dispatchedThrough).toBe('');
+  });
+
+  it('reads bank settlement off the bank line only — that is where Tally puts payment type', async () => {
+    const receipt = parseVoucherCollection(await load('vouchers-detail.xml'))[2];
+    expect(receipt.voucherType).toBe('Receipt');
+    expect(receipt.ledgerEntries).toHaveLength(2);
+
+    // BANKALLOCATIONS.LIST holds its fields directly, with no repeated child
+    // element — the shape real Tally exports.
+    const bank = receipt.ledgerEntries[0];
+    expect(bank.ledgerName).toBe('Bank of Baroda');
+    expect(bank.bankAllocation?.transactionType).toBe('Cheque/DD');
+    expect(bank.bankAllocation?.paymentMode).toBe('Transacted');
+    expect(bank.bankAllocation?.instrumentNumber).toBe('328650');
+    expect(bank.bankAllocation?.instrumentDate).toBe('20220331');
+    expect(bank.bankAllocation?.bankName).toBe('State Bank of India (India)');
+    expect(bank.bankAllocation?.paymentFavouring).toBe('Rajesh Sharma');
+
+    // The party line carries an empty allocation node; an empty node is noise,
+    // not a settlement, so it must not surface as an object of empty strings.
+    expect(receipt.ledgerEntries[1].ledgerName).toBe('Rajesh Sharma');
+    expect(receipt.ledgerEntries[1].bankAllocation).toBeUndefined();
+  });
+
+  it('still parses a voucher that carries none of the detail fields', async () => {
+    const [sales] = parseVoucherCollection(await load('vouchers.xml'));
+    expect(sales.reference).toBe('');
+    expect(sales.deliveryTerms).toEqual([]);
+    expect(sales.buyerAddress).toEqual([]);
+    expect(sales.ledgerEntries.every((e) => e.bankAllocation === undefined)).toBe(true);
   });
 });

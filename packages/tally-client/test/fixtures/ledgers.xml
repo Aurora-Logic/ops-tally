@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ENVELOPE>
+  <BODY>
+    <DATA>
+      <COLLECTION>
+        <LEDGER NAME="Acme Traders" RESERVEDNAME="">
+          <MASTERID>412</MASTERID>
+          <ALTERID>3180</ALTERID>
+          <GUID>4f9c1e30-0000-0000-0000-000000000412</GUID>
+          <NAME>Acme Traders</NAME>
+          <PARENT>Sundry Debtors</PARENT>
+          <PARTYGSTIN>27AABCU9603R1ZM</PARTYGSTIN>
+          <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>
+          <OPENINGBALANCE>-25,000.00</OPENINGBALANCE>
+          <CLOSINGBALANCE>1,84,250.50</CLOSINGBALANCE>
+          <LEDGERCONTACT>Ravi Menon</LEDGERCONTACT>
+          <LEDGERPHONE>022-24001188</LEDGERPHONE>
+          <LEDGERMOBILE>9820011223</LEDGERMOBILE>
+          <EMAIL>accounts@acmetraders.in</EMAIL>
+          <LEDGERSTATENAME>Maharashtra</LEDGERSTATENAME>
+          <COUNTRYNAME>India</COUNTRYNAME>
+          <PINCODE>400018</PINCODE>
+          <CREDITLIMIT>500000.00</CREDITLIMIT>
+          <BILLCREDITPERIOD>45 Days</BILLCREDITPERIOD>
+          <ISBILLWISEON>Yes</ISBILLWISEON>
+          <ADDRESS.LIST TYPE="String">
+            <ADDRESS>Unit 4, Sunmill Compound</ADDRESS>
+            <ADDRESS>Lower Parel West</ADDRESS>
+            <ADDRESS>Mumbai</ADDRESS>
+          </ADDRESS.LIST>
+        </LEDGER>
+        <LEDGER NAME="Bharat Plywood Supply" RESERVEDNAME="">
+          <MASTERID>577</MASTERID>
+          <ALTERID>3204</ALTERID>
+          <GUID>4f9c1e30-0000-0000-0000-000000000577</GUID>
+          <NAME>Bharat Plywood Supply</NAME>
+          <PARENT>Sundry Creditors</PARENT>
+          <PARTYGSTIN>29AAGCB1234H1Z4</PARTYGSTIN>
+          <GSTREGISTRATIONTYPE>Composition</GSTREGISTRATIONTYPE>
+          <OPENINGBALANCE>0.00</OPENINGBALANCE>
+          <CLOSINGBALANCE>-62,400.00</CLOSINGBALANCE>
+          <ISBILLWISEON>No</ISBILLWISEON>
+          <ADDRESS.LIST TYPE="String">
+            <ADDRESS>Plot 12, Peenya Industrial Area</ADDRESS>
+          </ADDRESS.LIST>
+        </LEDGER>
+        <LEDGER NAME="HDFC Current A/c" RESERVEDNAME="">
+          <MASTERID>88</MASTERID>
+          <ALTERID>2990</ALTERID>
+          <GUID>4f9c1e30-0000-0000-0000-000000000088</GUID>
+          <NAME>HDFC Current A/c</NAME>
+          <PARENT>Bank Accounts</PARENT>
+          <CLOSINGBALANCE>905432.10</CLOSINGBALANCE>
+        </LEDGER>
+      </COLLECTION>
+    </DATA>
+  </BODY>
+</ENVELOPE>
