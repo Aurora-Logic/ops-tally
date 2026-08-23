@@ -15,9 +15,11 @@ OpsTally Agent (Electron tray app)
    └── HTTPS POST → your server's webhook endpoint
 ```
 
-- **Change detection**: ALTERID watermarks for vouchers/ledgers/masters,
-  hash-diff for stock quantities and prices. First run baselines silently —
-  no event flood.
+- **Change detection**: ALTERID watermark narrows the voucher fetch;
+  stock and ledgers are hash-diffed every poll, because the values that
+  matter there (stock quantity, ledger balance) are computed by Tally and
+  don't move the record's AlterID. First run baselines silently — no event
+  flood.
 - **Durability**: events spool in SQLite (`%APPDATA%/opstally-agent/agent.db`);
   a webhook outage loses nothing. Exponential backoff 30s → 6h, poison events
   parked as `failed` with manual retry in the UI.
@@ -90,10 +92,22 @@ edits restart it, renderer edits hot-swap.
   `%APPDATA%/opstally-agent/agent.db`. Both persist across restarts —
   reopening the app does **not** re-baseline, it picks up exactly where
   it left off.
-- Each entity polls on its own interval (defaults: vouchers 2 min, stock
-  10 min, ledgers 30 min — configurable in the Polling tab). Vouchers and
-  ledgers query Tally for `AlterID > watermark` only; stock is hash-diffed
-  every poll (quantity is a computed value, so its AlterID never moves).
+- Each entity polls on its own interval (defaults: vouchers 15 min, stock
+  10 min, ledgers 30 min — configurable in the Polling tab). Vouchers query
+  Tally for `AlterID > watermark` only. Stock and ledgers pull the full list
+  and hash-diff it every poll: closing quantity and closing balance are both
+  computed by Tally, so the record's AlterID never moves when a voucher
+  changes them.
+- A voucher poll is **one request per financial year** of the company's
+  books, oldest first, with a pause between them. Tally cannot scope a
+  voucher collection more finely than a financial year — asking for a single
+  day returns that day's whole year, and asking for eight years returns one
+  of them — so the only way to see every year is to ask for each. That is
+  affordable because Tally applies the `AlterID > watermark` filter itself:
+  measured on a real company, one year of 17,144 vouchers is 82 MB
+  unfiltered and 1.5 KB filtered. It still costs Tally a few seconds of scan
+  per year even when nothing matches, which is why the voucher interval
+  defaults to minutes and the requests are spaced.
 - Anything new or changed becomes a row in the local event queue, and the
   dispatcher (ticking every 5s) drains it FIFO: sign, POST, mark
   delivered — or back off (30s → 2m → 10m → 30m → 2h → 6h, `failed` after
@@ -129,7 +143,7 @@ npm run probe -- --port 9000 --company "Your Company Name" --save-fixtures test/
 `npm run -w` argument forwarding gets ambiguous otherwise.)
 
 What it prints: every company Tally has loaded, then for stock items,
-ledgers, and vouchers (last 90 days) — count, max AlterID, GUID coverage,
+ledgers, and vouchers — count, max AlterID, GUID coverage,
 and one sample record. It ends with a verdict on whether AlterID-based
 watermark detection is viable for this Tally install (it should be — AlterID
 is a standard Tally feature — but the design explicitly plans for the
@@ -188,7 +202,14 @@ delivery 401s.
 ## Events
 
 `voucher.created` · `voucher.updated` · `voucher.cancelled` · `voucher.snapshot` ·
-`stock.updated` · `stock.snapshot` · `ledger.created` · `ledger.updated` · `ping`
+`stock.updated` · `stock.snapshot` · `ledger.created` · `ledger.updated` ·
+`ledger.snapshot` · `ping`
+
+Parties are not a separate entity in Tally — customers and suppliers are
+ledgers under the `Sundry Debtors` / `Sundry Creditors` groups, and arrive on
+the `ledger.*` events with balances, address, contact detail and credit terms
+attached. Every ledger ships (bank, tax, expense accounts included); filter on
+`parent` for the ones you want.
 
 Envelope:
 
