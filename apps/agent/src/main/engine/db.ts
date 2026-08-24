@@ -9,7 +9,7 @@ export interface EventRow {
   event: string;
   payload_json: string;
   created_at: string;
-  status: 'pending' | 'delivered' | 'failed';
+  status: 'pending' | 'delivered' | 'failed' | 'cancelled';
   attempts: number;
   next_attempt_at: string | null;
   last_error: string | null;
@@ -238,6 +238,13 @@ export class AgentDb {
     this.db
       .prepare("UPDATE events SET status = 'pending', attempts = 0, next_attempt_at = ?, last_error = NULL WHERE id = ?")
       .run(new Date().toISOString(), id);
+  }
+
+  cancelPendingEvents(): number {
+    const res = this.db
+      .prepare("UPDATE events SET status = 'cancelled', last_error = 'Cancelled by user' WHERE status = 'pending'")
+      .run();
+    return Number(res.changes);
   }
 
   recordDelivery(eventId: string, statusCode: number | null, durationMs: number, error?: string): void {

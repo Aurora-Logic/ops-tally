@@ -130,8 +130,12 @@ export class Dispatcher {
       this.queuePausedUntil = Date.now() + pauseS * 1000;
       return false;
     } catch (err: any) {
-      this.deps.db.recordDelivery(row.id, null, Date.now() - started, err.message);
-      const pauseS = this.scheduleRetry(row, err.message ?? 'network error');
+      const isAbort = err.name === 'AbortError';
+      const msg = isAbort
+        ? 'Request timed out after 120s (server took too long to respond)'
+        : (err.message ?? 'Network error');
+      this.deps.db.recordDelivery(row.id, null, Date.now() - started, msg);
+      const pauseS = this.scheduleRetry(row, msg);
       this.queuePausedUntil = Date.now() + pauseS * 1000;
       return false;
     }
@@ -139,7 +143,7 @@ export class Dispatcher {
 
   private async post(url: string, body: string, row: EventRow, secret: string): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
+    const timer = setTimeout(() => controller.abort(), 120_000);
     try {
       return await fetch(url, {
         method: 'POST',
@@ -197,5 +201,13 @@ export class Dispatcher {
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
+  }
+
+  /** Cancel all pending dispatches in the database and reset queue pause. */
+  cancelAll(): number {
+    const count = this.deps.db.cancelPendingEvents();
+    this.queuePausedUntil = 0;
+    this.deps.onStatus?.({ state: 'idle', message: `Cancelled ${count} queued event(s)` });
+    return count;
   }
 }
