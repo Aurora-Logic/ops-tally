@@ -10,6 +10,7 @@ const api = {
   regenerateSecret: () => ipcRenderer.invoke('secret:regenerate'),
   listDeliveries: () => ipcRenderer.invoke('deliveries:list'),
   retryEvent: (id: string) => ipcRenderer.invoke('events:retry', id),
+  cancelAllEvents: () => ipcRenderer.invoke('events:cancelAll'),
   queueStats: () => ipcRenderer.invoke('queue:stats'),
   runPollNow: () => ipcRenderer.invoke('poll:runNow'),
   fullResync: () => ipcRenderer.invoke('poll:fullResync'),

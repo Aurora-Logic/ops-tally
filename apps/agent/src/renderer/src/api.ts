@@ -13,7 +13,7 @@ export interface DeliveryRow {
   id: string;
   event: string;
   created_at: string;
-  status: 'pending' | 'delivered' | 'failed';
+  status: 'pending' | 'delivered' | 'failed' | 'cancelled';
   attempts: number;
   next_attempt_at: string | null;
   last_error: string | null;
@@ -43,6 +43,7 @@ export interface OpsTallyApi {
   regenerateSecret(): Promise<string>;
   listDeliveries(): Promise<DeliveryRow[]>;
   retryEvent(id: string): Promise<boolean>;
+  cancelAllEvents(): Promise<{ ok: boolean; count: number }>;
   queueStats(): Promise<{ pending: number; delivered: number; failed: number }>;
   runPollNow(): Promise<boolean>;
   fullResync(): Promise<boolean>;

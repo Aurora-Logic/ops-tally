@@ -98,6 +98,12 @@ export function registerIpc(deps: IpcDeps): void {
     return true;
   });
 
+  ipcMain.handle('events:cancelAll', () => {
+    const count = dispatcher.cancelAll();
+    broadcastStatus();
+    return { ok: true, count };
+  });
+
   ipcMain.handle('queue:stats', () => db.queueStats());
 
   ipcMain.handle('poll:runNow', () => {
