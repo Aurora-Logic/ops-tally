@@ -228,7 +228,7 @@ function guardWatermarkRegression(ctx: DifferContext, entity: string, liveMax: n
 export function voucherSnapshotEvents(
   ctx: DifferContext,
   vouchers: VoucherJSON[],
-  chunkSize = 500
+  chunkSize = 50
 ): EventEnvelope[] {
   const events: EventEnvelope[] = [];
   for (let i = 0; i < vouchers.length; i += chunkSize) {
