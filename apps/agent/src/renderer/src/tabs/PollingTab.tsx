@@ -134,6 +134,17 @@ export default function PollingTab({
         >
           Full ledger resync
         </button>
+        <button
+          onClick={async () => {
+            if (window.confirm('Cancel all pending event dispatches currently in the queue?')) {
+              const res = await api.cancelAllEvents();
+              setNote(`Cancelled ${res.count} pending event(s)`);
+            }
+          }}
+          className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+        >
+          Cancel all dispatches
+        </button>
         <span className="text-sm text-slate-500">{note}</span>
       </div>
     </div>

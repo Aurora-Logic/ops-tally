@@ -5,6 +5,7 @@ const BADGE: Record<DeliveryRow['status'], string> = {
   delivered: 'bg-green-100 text-green-700',
   pending: 'bg-yellow-100 text-yellow-700',
   failed: 'bg-red-100 text-red-700',
+  cancelled: 'bg-slate-100 text-slate-700',
 };
 
 function ChevronIcon({ open }: { open: boolean }) {
@@ -48,9 +49,24 @@ export default function DeliveriesTab() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold">Recent events</h2>
-        <button onClick={() => void refresh()} className="rounded border px-3 py-1.5 text-sm hover:bg-slate-100">
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {rows.some((r) => r.status === 'pending') && (
+            <button
+              onClick={async () => {
+                if (window.confirm('Cancel all pending events in queue?')) {
+                  await api.cancelAllEvents();
+                  await refresh();
+                }
+              }}
+              className="rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+            >
+              Cancel pending
+            </button>
+          )}
+          <button onClick={() => void refresh()} className="rounded border px-3 py-1.5 text-sm hover:bg-slate-100">
+            Refresh
+          </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -101,7 +117,7 @@ export default function DeliveriesTab() {
                         {r.last_error ?? ''}
                       </td>
                       <td className="px-3 py-2">
-                        {r.status === 'failed' && (
+                        {(r.status === 'failed' || r.status === 'cancelled') && (
                           <button
                             onClick={() => void api.retryEvent(r.id).then(refresh)}
                             className="rounded border px-2 py-1 text-xs hover:bg-slate-100"
