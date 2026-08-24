@@ -34,6 +34,7 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle('config:set', (_e, patch: Partial<PublicConfig>) => {
     const cfg = updateConfig(patch);
+    dispatcher.wake();
     broadcastStatus();
     return cfg;
   });
@@ -62,7 +63,11 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle('secret:reveal', () => getSecret());
 
-  ipcMain.handle('secret:regenerate', () => regenerateSecret());
+  ipcMain.handle('secret:regenerate', () => {
+    const s = regenerateSecret();
+    dispatcher.wake();
+    return s;
+  });
 
   ipcMain.handle('deliveries:list', () =>
     db.recentEvents(100).map((row) => {
