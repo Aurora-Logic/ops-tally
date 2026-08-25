@@ -35,7 +35,8 @@ export class TallyClient {
   }
 
   get url(): string {
-    return `http://${this.host}:${this.port}`;
+    const host = this.host === 'localhost' ? '127.0.0.1' : this.host;
+    return `http://${host}:${this.port}`;
   }
 
   private async exec(xml: string): Promise<any> {
@@ -71,9 +72,12 @@ export class TallyClient {
    * `withSalePrices: false` to skip both (potentially slow) voucher scans.
    */
   async getStockItems(withSalePrices = true): Promise<StockItemJSON[]> {
-    const [saleRates, purchaseRates] = withSalePrices
-      ? await Promise.all([this.getSalesLastRates(), this.getPurchaseLastRates()])
-      : [new Map<string, number>(), new Map<string, number>()];
+    let saleRates = new Map<string, number>();
+    let purchaseRates = new Map<string, number>();
+    if (withSalePrices) {
+      saleRates = await this.getSalesLastRates();
+      purchaseRates = await this.getPurchaseLastRates();
+    }
     return parseStockCollection(await this.exec(buildStockItemsXML(this.company)), saleRates, purchaseRates);
   }
 
