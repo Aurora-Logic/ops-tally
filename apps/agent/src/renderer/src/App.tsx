@@ -57,9 +57,10 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       <header className="flex items-center justify-between border-b bg-white px-6 py-3">
-        <div className="flex items-center gap-3">
-          <span className={`inline-block h-3.5 w-3.5 rounded-full ${DOT[status?.trayState ?? 'paused']}`} />
-          <h1 className="text-base font-bold text-slate-800">OpsTally Agent</h1>
+        <div className="flex items-center gap-2.5">
+          <img src="/icon.svg" alt="OpsTally Logo" className="h-6 w-6 rounded shadow-sm" />
+          <span className={`inline-block h-2.5 w-2.5 rounded-full ${DOT[status?.trayState ?? 'paused']}`} />
+          <h1 className="text-base font-bold tracking-tight text-slate-800">OpsTally Agent</h1>
 
           <div className="ml-4 flex items-center gap-2 rounded-lg bg-slate-100 p-1">
             <span className="text-xs font-semibold uppercase text-slate-500 pl-2">Company:</span>
