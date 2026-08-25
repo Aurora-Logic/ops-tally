@@ -141,11 +141,17 @@ export function registerIpc(deps: IpcDeps): void {
     return { ok: true, count };
   });
 
-  ipcMain.handle('queue:stats', (_e, companyId?: string) => db.queueStats(companyId));
+  ipcMain.handle('poll:runNow', async (_e, companyId?: string) => {
+    return await poller.pollAll(companyId);
+  });
 
-  ipcMain.handle('poll:runNow', (_e, companyId?: string) => {
-    void poller.pollAll(companyId);
-    return true;
+  ipcMain.handle('poll:watermarks', (_e, companyId?: string) => {
+    const targetId = companyId || getConfig().activeCompanyId;
+    return {
+      vouchers: db.getWatermark(targetId, 'vouchers'),
+      stock: db.getWatermark(targetId, 'stock'),
+      ledgers: db.getWatermark(targetId, 'ledgers'),
+    };
   });
 
   ipcMain.handle('poll:fullResync', (_e, companyId?: string) => {

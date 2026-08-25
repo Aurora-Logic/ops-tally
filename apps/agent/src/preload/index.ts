@@ -16,6 +16,7 @@ const api = {
   cancelAllEvents: (companyId?: string) => ipcRenderer.invoke('events:cancelAll', companyId),
   queueStats: (companyId?: string) => ipcRenderer.invoke('queue:stats', companyId),
   runPollNow: (companyId?: string) => ipcRenderer.invoke('poll:runNow', companyId),
+  getWatermarks: (companyId?: string) => ipcRenderer.invoke('poll:watermarks', companyId),
   fullResync: (companyId?: string) => ipcRenderer.invoke('poll:fullResync', companyId),
   fullVoucherResync: (companyId?: string) => ipcRenderer.invoke('poll:fullVoucherResync', companyId),
   fullLedgerResync: (companyId?: string) => ipcRenderer.invoke('poll:fullLedgerResync', companyId),

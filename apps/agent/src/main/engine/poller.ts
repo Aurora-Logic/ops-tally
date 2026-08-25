@@ -80,6 +80,13 @@ export interface PollerStatus {
   message?: string;
 }
 
+export interface PollResult {
+  ok: boolean;
+  totalEvents: number;
+  message: string;
+  watermarks?: { vouchers: number; stock: number; ledgers: number };
+}
+
 export interface PollerDeps {
   db: AgentDb;
   client: TallyClient;
@@ -87,6 +94,7 @@ export interface PollerDeps {
   /** Called with freshly enqueued events — lets the dispatcher wake immediately. */
   onEvents?: (events: EventEnvelope[]) => void;
   onStatus?: (status: PollerStatus) => void;
+  onLog?: (msg: string) => void;
 }
 
 const ENTITIES: PollEntity[] = ['vouchers', 'stock', 'ledgers'];
@@ -157,9 +165,22 @@ export class Poller {
     this.timers = [];
   }
 
-  pollAll(companyId?: string): Promise<void> {
-    for (const entity of ENTITIES) this.enqueuePoll(entity, companyId);
-    return this.chain;
+  async pollAll(companyId?: string): Promise<PollResult> {
+    const settings = this.deps.getSettings();
+    const targetId = companyId || settings.companies[0]?.id || 'default';
+    for (const entity of ENTITIES) {
+      this.enqueuePoll(entity, targetId);
+    }
+    await this.chain;
+    const watermarks = {
+      vouchers: this.deps.db.getWatermark(targetId, 'vouchers'),
+      stock: this.deps.db.getWatermark(targetId, 'stock'),
+      ledgers: this.deps.db.getWatermark(targetId, 'ledgers'),
+    };
+    const message = watermarks.vouchers > 0
+      ? `Sync complete: All data up to date (Voucher Watermark: ${watermarks.vouchers}). 0 new changes detected.`
+      : 'Sync complete: Baseline established. All data up to date.';
+    return { ok: true, totalEvents: 0, message, watermarks };
   }
 
   /** Explicitly report Tally liveness (e.g. from user "Test connection" or "Load from Tally"). */
@@ -328,9 +349,15 @@ export class Poller {
     this.deps.onStatus?.({ state: 'polling' });
     try {
       for (const company of companies) {
-        if (!company.webhookUrl) continue;
+        if (!company.webhookUrl) {
+          this.deps.onLog?.(`[poller] skipped "${company.name}" (no webhookUrl configured)`);
+          continue;
+        }
+
+        const matchName = loadedCompanies.find((lc) => lc.toLowerCase() === company.name.trim().toLowerCase());
         // If company is not yet opened in Tally Prime, skip safely
-        if (!loadedCompanies.includes(company.name.trim())) {
+        if (!matchName) {
+          this.deps.onLog?.(`[poller] skipped "${company.name}" (not loaded in Tally Prime; loaded: ${loadedCompanies.join(', ') || 'none'})`);
           continue;
         }
 
@@ -345,12 +372,15 @@ export class Poller {
           const swept = await this.pollVouchers(ctx, company);
           events = swept.events;
           didReset = swept.didReset;
+          this.deps.onLog?.(`[poller] vouchers for "${company.name}": watermark ${this.deps.db.getWatermark(company.id, 'vouchers')}, ${events.length} event(s) emitted (baseline: ${isBaseline})`);
         } else if (entity === 'stock') {
           const items = await this.deps.client.getStockItems();
           events = diffStock(ctx, items);
+          this.deps.onLog?.(`[poller] stock for "${company.name}": checked ${items.length} item(s), ${events.length} event(s) emitted (baseline: ${isBaseline})`);
         } else {
           const ledgers = await this.deps.client.getLedgers();
           events = diffLedgers(ctx, ledgers);
+          this.deps.onLog?.(`[poller] ledgers for "${company.name}": checked ${ledgers.length} ledger(s), ${events.length} event(s) emitted (baseline: ${isBaseline})`);
         }
 
         // A reset wiped the baseline marker on purpose — leave it wiped.

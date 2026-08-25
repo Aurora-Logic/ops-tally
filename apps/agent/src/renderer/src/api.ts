@@ -48,6 +48,13 @@ export interface StatusPush {
   trayState: 'ok' | 'warn' | 'down' | 'paused';
 }
 
+export interface PollResult {
+  ok: boolean;
+  totalEvents: number;
+  message: string;
+  watermarks?: { vouchers: number; stock: number; ledgers: number };
+}
+
 export interface OpsTallyApi {
   getConfig(): Promise<PublicConfig>;
   setConfig(patch: Partial<PublicConfig>): Promise<PublicConfig>;
@@ -63,7 +70,8 @@ export interface OpsTallyApi {
   retryEvent(id: string): Promise<boolean>;
   cancelAllEvents(companyId?: string): Promise<{ ok: boolean; count: number }>;
   queueStats(companyId?: string): Promise<{ pending: number; delivered: number; failed: number }>;
-  runPollNow(companyId?: string): Promise<boolean>;
+  runPollNow(companyId?: string): Promise<PollResult>;
+  getWatermarks(companyId?: string): Promise<{ vouchers: number; stock: number; ledgers: number }>;
   fullResync(companyId?: string): Promise<boolean>;
   fullVoucherResync(companyId?: string): Promise<boolean>;
   fullLedgerResync(companyId?: string): Promise<boolean>;

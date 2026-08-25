@@ -107,6 +107,7 @@ if (!gotLock) {
       pollerStatus = s;
       broadcastStatus();
     },
+    onLog: (msg) => log.info(msg),
   });
 
   function createWindow(): void {
@@ -115,10 +116,12 @@ if (!gotLock) {
       win.focus();
       return;
     }
+    const iconPath = join(import.meta.dirname, '../../resources/icon.png');
     win = new BrowserWindow({
       width: 860,
       height: 620,
       title: 'OpsTally Agent',
+      icon: iconPath,
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(import.meta.dirname, '../preload/index.mjs'),
