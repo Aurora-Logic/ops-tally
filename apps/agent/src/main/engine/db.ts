@@ -6,6 +6,7 @@ import type { EventEnvelope } from './events.js';
 
 export interface EventRow {
   id: string;
+  company_id: string;
   event: string;
   payload_json: string;
   created_at: string;
@@ -94,19 +95,23 @@ export class AgentDb {
         value TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS watermarks (
-        entity TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'default',
+        entity TEXT NOT NULL,
         last_alter_id INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (company_id, entity)
       );
       CREATE TABLE IF NOT EXISTS snapshots (
+        company_id TEXT NOT NULL DEFAULT 'default',
         entity TEXT NOT NULL,
         key TEXT NOT NULL,
         hash TEXT NOT NULL,
         payload_json TEXT NOT NULL,
-        PRIMARY KEY (entity, key)
+        PRIMARY KEY (company_id, entity, key)
       );
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'default',
         event TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
@@ -116,7 +121,7 @@ export class AgentDb {
         last_error TEXT,
         delivered_at TEXT
       );
-      CREATE INDEX IF NOT EXISTS idx_events_queue ON events (status, next_attempt_at, created_at);
+      CREATE INDEX IF NOT EXISTS idx_events_queue ON events (company_id, status, next_attempt_at, created_at);
       CREATE TABLE IF NOT EXISTS deliveries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_id TEXT NOT NULL,
@@ -126,6 +131,46 @@ export class AgentDb {
         error TEXT
       );
     `);
+
+    // Migration for legacy schema without company_id column
+    try {
+      const info = this.db.pragma('table_info(watermarks)') as { name: string }[];
+      if (info && !info.some((col) => col.name === 'company_id')) {
+        this.db.exec(`
+          ALTER TABLE watermarks RENAME TO _watermarks_old;
+          CREATE TABLE watermarks (
+            company_id TEXT NOT NULL DEFAULT 'default',
+            entity TEXT NOT NULL,
+            last_alter_id INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (company_id, entity)
+          );
+          INSERT INTO watermarks (company_id, entity, last_alter_id, updated_at)
+            SELECT 'default', entity, last_alter_id, updated_at FROM _watermarks_old;
+          DROP TABLE _watermarks_old;
+
+          ALTER TABLE snapshots RENAME TO _snapshots_old;
+          CREATE TABLE snapshots (
+            company_id TEXT NOT NULL DEFAULT 'default',
+            entity TEXT NOT NULL,
+            key TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY (company_id, entity, key)
+          );
+          INSERT INTO snapshots (company_id, entity, key, hash, payload_json)
+            SELECT 'default', entity, key, hash, payload_json FROM _snapshots_old;
+          DROP TABLE _snapshots_old;
+        `);
+      }
+    } catch {}
+
+    try {
+      const info = this.db.pragma('table_info(events)') as { name: string }[];
+      if (info && !info.some((col) => col.name === 'company_id')) {
+        this.db.exec(`ALTER TABLE events ADD COLUMN company_id TEXT NOT NULL DEFAULT 'default';`);
+      }
+    } catch {}
   }
 
   // ---- meta ----
@@ -153,61 +198,93 @@ export class AgentDb {
   }
 
   // ---- watermarks ----
-  getWatermark(entity: string): number {
+  getWatermark(companyIdOrEntity: string, maybeEntity?: string): number {
+    const companyId = maybeEntity !== undefined ? companyIdOrEntity : 'default';
+    const entity = maybeEntity !== undefined ? maybeEntity : companyIdOrEntity;
     const row = this.db
-      .prepare('SELECT last_alter_id FROM watermarks WHERE entity = ?')
-      .get(entity) as { last_alter_id: number } | undefined;
+      .prepare('SELECT last_alter_id FROM watermarks WHERE company_id = ? AND entity = ?')
+      .get(companyId, entity) as { last_alter_id: number } | undefined;
     return row?.last_alter_id ?? 0;
   }
 
-  setWatermark(entity: string, alterId: number): void {
+  setWatermark(companyIdOrEntity: string, entityOrAlterId: string | number, maybeAlterId?: number): void {
+    const companyId = maybeAlterId !== undefined ? companyIdOrEntity : 'default';
+    const entity = maybeAlterId !== undefined ? (entityOrAlterId as string) : companyIdOrEntity;
+    const alterId = maybeAlterId !== undefined ? maybeAlterId : (entityOrAlterId as number);
     this.db
       .prepare(
-        `INSERT INTO watermarks (entity, last_alter_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(entity) DO UPDATE SET last_alter_id = excluded.last_alter_id, updated_at = excluded.updated_at`
+        `INSERT INTO watermarks (company_id, entity, last_alter_id, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(company_id, entity) DO UPDATE SET last_alter_id = excluded.last_alter_id, updated_at = excluded.updated_at`
       )
-      .run(entity, alterId, new Date().toISOString());
+      .run(companyId, entity, alterId, new Date().toISOString());
   }
 
   // ---- snapshots ----
-  getSnapshot(entity: string, key: string): { hash: string; payload_json: string } | undefined {
+  getSnapshot(companyIdOrEntity: string, entityOrKey: string, maybeKey?: string): { hash: string; payload_json: string } | undefined {
+    const companyId = maybeKey !== undefined ? companyIdOrEntity : 'default';
+    const entity = maybeKey !== undefined ? entityOrKey : companyIdOrEntity;
+    const key = maybeKey !== undefined ? maybeKey : entityOrKey;
     return this.db
-      .prepare('SELECT hash, payload_json FROM snapshots WHERE entity = ? AND key = ?')
-      .get(entity, key) as { hash: string; payload_json: string } | undefined;
+      .prepare('SELECT hash, payload_json FROM snapshots WHERE company_id = ? AND entity = ? AND key = ?')
+      .get(companyId, entity, key) as { hash: string; payload_json: string } | undefined;
   }
 
-  putSnapshot(entity: string, key: string, hash: string, payloadJson: string): void {
+  putSnapshot(companyIdOrEntity: string, entityOrKey: string, keyOrHash: string, hashOrPayload: string, maybePayload?: string): void {
+    const companyId = maybePayload !== undefined ? companyIdOrEntity : 'default';
+    const entity = maybePayload !== undefined ? entityOrKey : companyIdOrEntity;
+    const key = maybePayload !== undefined ? keyOrHash : entityOrKey;
+    const hash = maybePayload !== undefined ? hashOrPayload : keyOrHash;
+    const payloadJson = maybePayload !== undefined ? maybePayload : hashOrPayload;
     this.db
       .prepare(
-        `INSERT INTO snapshots (entity, key, hash, payload_json) VALUES (?, ?, ?, ?)
-         ON CONFLICT(entity, key) DO UPDATE SET hash = excluded.hash, payload_json = excluded.payload_json`
+        `INSERT INTO snapshots (company_id, entity, key, hash, payload_json) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(company_id, entity, key) DO UPDATE SET hash = excluded.hash, payload_json = excluded.payload_json`
       )
-      .run(entity, key, hash, payloadJson);
+      .run(companyId, entity, key, hash, payloadJson);
   }
 
-  clearEntity(entity: string): void {
-    this.db.prepare('DELETE FROM snapshots WHERE entity = ?').run(entity);
-    this.db.prepare('DELETE FROM watermarks WHERE entity = ?').run(entity);
+  clearEntity(companyIdOrEntity: string, maybeEntity?: string): void {
+    const companyId = maybeEntity !== undefined ? companyIdOrEntity : 'default';
+    const entity = maybeEntity !== undefined ? maybeEntity : companyIdOrEntity;
+    this.db.prepare('DELETE FROM snapshots WHERE company_id = ? AND entity = ?').run(companyId, entity);
+    this.db.prepare('DELETE FROM watermarks WHERE company_id = ? AND entity = ?').run(companyId, entity);
+    this.db.prepare("DELETE FROM meta WHERE key = ?").run(`baseline:${companyId}:${entity}`);
     this.db.prepare("DELETE FROM meta WHERE key = ?").run(`baseline:${entity}`);
   }
 
-  /** Wipe all sync state (snapshots, watermarks, baselines) — e.g. on company change. */
-  resetSyncState(): void {
-    this.db.exec("DELETE FROM snapshots; DELETE FROM watermarks; DELETE FROM meta WHERE key LIKE 'baseline:%';");
+  /** Wipe sync state (snapshots, watermarks, baselines) for a specific company or all companies. */
+  resetSyncState(companyId?: string): void {
+    if (companyId) {
+      this.db.prepare('DELETE FROM snapshots WHERE company_id = ?').run(companyId);
+      this.db.prepare('DELETE FROM watermarks WHERE company_id = ?').run(companyId);
+      this.db.prepare("DELETE FROM meta WHERE key LIKE ?").run(`baseline:${companyId}:%`);
+    } else {
+      this.db.exec("DELETE FROM snapshots; DELETE FROM watermarks; DELETE FROM meta WHERE key LIKE 'baseline:%';");
+    }
   }
 
   // ---- events queue ----
-  enqueueEvent(envelope: EventEnvelope): void {
+  enqueueEvent(companyIdOrEnvelope: string | EventEnvelope, maybeEnvelope?: EventEnvelope): void {
+    const companyId = maybeEnvelope !== undefined ? (companyIdOrEnvelope as string) : 'default';
+    const envelope = (maybeEnvelope !== undefined ? maybeEnvelope : companyIdOrEnvelope) as EventEnvelope;
     this.db
       .prepare(
-        `INSERT INTO events (id, event, payload_json, created_at, status, next_attempt_at)
-         VALUES (?, ?, ?, ?, 'pending', ?)`
+        `INSERT INTO events (id, company_id, event, payload_json, created_at, status, next_attempt_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`
       )
-      .run(envelope.id, envelope.event, JSON.stringify(envelope), envelope.created_at, envelope.created_at);
+      .run(envelope.id, companyId, envelope.event, JSON.stringify(envelope), envelope.created_at, envelope.created_at);
   }
 
   /** Oldest pending event that is due, FIFO. */
-  nextDueEvent(now = new Date()): EventRow | undefined {
+  nextDueEvent(now = new Date(), companyId?: string): EventRow | undefined {
+    if (companyId) {
+      return this.db
+        .prepare(
+          `SELECT * FROM events WHERE company_id = ? AND status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           ORDER BY created_at ASC LIMIT 1`
+        )
+        .get(companyId, now.toISOString()) as EventRow | undefined;
+    }
     return this.db
       .prepare(
         `SELECT * FROM events WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
@@ -240,7 +317,13 @@ export class AgentDb {
       .run(new Date().toISOString(), id);
   }
 
-  cancelPendingEvents(): number {
+  cancelPendingEvents(companyId?: string): number {
+    if (companyId) {
+      const res = this.db
+        .prepare("UPDATE events SET status = 'cancelled', last_error = 'Cancelled by user' WHERE company_id = ? AND status = 'pending'")
+        .run(companyId);
+      return Number(res.changes);
+    }
     const res = this.db
       .prepare("UPDATE events SET status = 'cancelled', last_error = 'Cancelled by user' WHERE status = 'pending'")
       .run();
@@ -253,16 +336,26 @@ export class AgentDb {
       .run(eventId, new Date().toISOString(), statusCode, durationMs, error ? error.slice(0, 500) : null);
   }
 
-  recentEvents(limit = 50): EventRow[] {
+  recentEvents(limit = 50, companyId?: string): EventRow[] {
+    if (companyId) {
+      return this.db
+        .prepare('SELECT * FROM events WHERE company_id = ? ORDER BY created_at DESC LIMIT ?')
+        .all(companyId, limit) as EventRow[];
+    }
     return this.db
       .prepare('SELECT * FROM events ORDER BY created_at DESC LIMIT ?')
       .all(limit) as EventRow[];
   }
 
-  queueStats(): { pending: number; delivered: number; failed: number } {
-    const rows = this.db
-      .prepare('SELECT status, COUNT(*) AS n FROM events GROUP BY status')
-      .all() as { status: string; n: number }[];
+  queueStats(companyId?: string): { pending: number; delivered: number; failed: number } {
+    const rows = companyId
+      ? (this.db
+          .prepare('SELECT status, COUNT(*) AS n FROM events WHERE company_id = ? GROUP BY status')
+          .all(companyId) as { status: string; n: number }[])
+      : (this.db
+          .prepare('SELECT status, COUNT(*) AS n FROM events GROUP BY status')
+          .all() as { status: string; n: number }[]);
+
     const stats = { pending: 0, delivered: 0, failed: 0 };
     for (const r of rows) {
       if (r.status in stats) (stats as any)[r.status] = r.n;

@@ -58,7 +58,15 @@ if (!gotLock) {
 
   const dispatcher = new Dispatcher({
     db,
-    getSettings: () => ({ webhookUrl: getConfig().webhookUrl, secret: getSecret() }),
+    getSettings: (companyId?: string) => {
+      const cfg = getConfig();
+      const targetId = companyId || cfg.activeCompanyId;
+      const comp = cfg.companies.find((c) => c.id === targetId) ?? cfg.companies[0];
+      return {
+        webhookUrl: comp?.webhookUrl ?? '',
+        secret: getCompanySecret(targetId),
+      };
+    },
     onStatus: (s) => {
       if (s.state !== dispatcherStatus.state || s.message !== dispatcherStatus.message) {
         log.info(`[dispatcher] ${s.state}${s.message ? ` — ${s.message}` : ''}`);
@@ -75,13 +83,17 @@ if (!gotLock) {
     getSettings: () => {
       const cfg = getConfig();
       return {
-        company: cfg.company,
         tallyHost: cfg.tallyHost,
         tallyPort: cfg.tallyPort,
         paused: cfg.paused,
-        voucherTypes: cfg.voucherTypes,
-        intervalsMinutes: cfg.intervalsMinutes,
-        webhookUrl: cfg.webhookUrl,
+        companies: cfg.companies.map((c) => ({
+          id: c.id,
+          name: c.name,
+          enabled: c.enabled,
+          webhookUrl: c.webhookUrl,
+          voucherTypes: c.voucherTypes,
+          intervalsMinutes: c.intervalsMinutes,
+        })),
       };
     },
     onEvents: (events) => {

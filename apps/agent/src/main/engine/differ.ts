@@ -24,14 +24,15 @@ export function maxAlterId(records: readonly { alterId: number }[]): number {
  * year walker can ask the question once, about the aggregate, rather than once
  * per window.
  */
-export function isWatermarkRegression(db: AgentDb, entity: string, liveMax: number): boolean {
-  const stored = db.getWatermark(entity);
+export function isWatermarkRegression(db: AgentDb, entity: string, liveMax: number, companyId = 'default'): boolean {
+  const stored = db.getWatermark(companyId, entity);
   return stored > 0 && liveMax > 0 && liveMax < stored;
 }
 
 export interface DifferContext {
   db: AgentDb;
   company: string;
+  companyId?: string;
   installId: string;
   /** Baseline mode: record snapshots but emit no events (first run). */
   baseline: boolean;
@@ -51,21 +52,22 @@ function diffRecords<T>(
   updatedEvent: TallyEventName
 ): EventEnvelope[] {
   const events: EventEnvelope[] = [];
+  const cid = ctx.companyId ?? 'default';
   const tx = ctx.db.db.transaction(() => {
     for (const rec of records) {
       const key = keyOf(rec);
       if (!key) continue;
       const hash = hashOf(hashPayload(rec));
-      const prev = ctx.db.getSnapshot(entity, key);
+      const prev = ctx.db.getSnapshot(cid, entity, key);
       if (!prev) {
-        ctx.db.putSnapshot(entity, key, hash, JSON.stringify(rec));
+        ctx.db.putSnapshot(cid, entity, key, hash, JSON.stringify(rec));
         if (!ctx.baseline && createdEvent) {
           events.push(makeEnvelope(createdEvent, rec, ctx.company, ctx.installId));
         } else if (!ctx.baseline && !createdEvent) {
           events.push(makeEnvelope(updatedEvent, rec, ctx.company, ctx.installId));
         }
       } else if (prev.hash !== hash) {
-        ctx.db.putSnapshot(entity, key, hash, JSON.stringify(rec));
+        ctx.db.putSnapshot(cid, entity, key, hash, JSON.stringify(rec));
         if (!ctx.baseline) {
           events.push(makeEnvelope(updatedEvent, rec, ctx.company, ctx.installId));
         }
@@ -101,6 +103,7 @@ export function diffVouchers(
   opts: { windowed?: boolean } = {}
 ): EventEnvelope[] {
   const entity = 'vouchers';
+  const cid = ctx.companyId ?? 'default';
   const wasReset =
     opts.windowed === true ? false : guardWatermarkRegression(ctx, entity, maxAlterId(vouchers));
   if (wasReset) ctx = { ...ctx, baseline: true };
@@ -111,17 +114,17 @@ export function diffVouchers(
       const key = v.guid || v.masterId;
       if (!key) continue;
       const hash = hashOf(v);
-      const prev = ctx.db.getSnapshot(entity, key);
+      const prev = ctx.db.getSnapshot(cid, entity, key);
       const wasCancelled = prev ? (JSON.parse(prev.payload_json) as VoucherJSON).isCancelled : false;
       if (!prev) {
-        ctx.db.putSnapshot(entity, key, hash, JSON.stringify(v));
+        ctx.db.putSnapshot(cid, entity, key, hash, JSON.stringify(v));
         if (!ctx.baseline) {
           events.push(
             makeEnvelope(v.isCancelled ? 'voucher.cancelled' : 'voucher.created', v, ctx.company, ctx.installId)
           );
         }
       } else if (prev.hash !== hash) {
-        ctx.db.putSnapshot(entity, key, hash, JSON.stringify(v));
+        ctx.db.putSnapshot(cid, entity, key, hash, JSON.stringify(v));
         if (!ctx.baseline) {
           const name: TallyEventName =
             v.isCancelled && !wasCancelled ? 'voucher.cancelled' : 'voucher.updated';
@@ -134,7 +137,7 @@ export function diffVouchers(
 
   if (opts.windowed !== true) {
     const maxAlter = maxAlterId(vouchers);
-    if (maxAlter > ctx.db.getWatermark(entity)) ctx.db.setWatermark(entity, maxAlter);
+    if (maxAlter > ctx.db.getWatermark(cid, entity)) ctx.db.setWatermark(cid, entity, maxAlter);
   }
   return events;
 }
@@ -144,11 +147,13 @@ export function diffVouchers(
  * computed value, so the item's ALTERID does not move when a voucher changes it.
  */
 export function diffStock(ctx: DifferContext, items: StockItemJSON[]): EventEnvelope[] {
-  const wasReset = guardWatermarkRegression(ctx, 'stock', maxAlterId(items));
+  const entity = 'stock';
+  const cid = ctx.companyId ?? 'default';
+  const wasReset = guardWatermarkRegression(ctx, entity, maxAlterId(items));
   if (wasReset) ctx = { ...ctx, baseline: true };
   const events = diffRecords(
     ctx,
-    'stock',
+    entity,
     items,
     (i) => i.guid || i.masterId || i.name,
     (i) => ({ qty: i.closingQty, unit: i.baseUnits, sale: i.salePrice, cost: i.costPrice, name: i.name, parent: i.parent }),
@@ -156,7 +161,7 @@ export function diffStock(ctx: DifferContext, items: StockItemJSON[]): EventEnve
     'stock.updated'
   );
   const maxAlter = maxAlterId(items);
-  if (maxAlter > ctx.db.getWatermark('stock')) ctx.db.setWatermark('stock', maxAlter);
+  if (maxAlter > ctx.db.getWatermark(cid, entity)) ctx.db.setWatermark(cid, entity, maxAlter);
   return events;
 }
 
@@ -169,11 +174,13 @@ export function diffStock(ctx: DifferContext, items: StockItemJSON[]): EventEnve
  * refreshed when someone renamed the account.
  */
 export function diffLedgers(ctx: DifferContext, ledgers: LedgerJSON[]): EventEnvelope[] {
-  const wasReset = guardWatermarkRegression(ctx, 'ledgers', maxAlterId(ledgers));
+  const entity = 'ledgers';
+  const cid = ctx.companyId ?? 'default';
+  const wasReset = guardWatermarkRegression(ctx, entity, maxAlterId(ledgers));
   if (wasReset) ctx = { ...ctx, baseline: true };
   const events = diffRecords(
     ctx,
-    'ledgers',
+    entity,
     ledgers,
     (l) => l.guid || l.masterId || l.name,
     (l) => ({
@@ -199,7 +206,7 @@ export function diffLedgers(ctx: DifferContext, ledgers: LedgerJSON[]): EventEnv
     'ledger.updated'
   );
   const maxAlter = maxAlterId(ledgers);
-  if (maxAlter > ctx.db.getWatermark('ledgers')) ctx.db.setWatermark('ledgers', maxAlter);
+  if (maxAlter > ctx.db.getWatermark(cid, entity)) ctx.db.setWatermark(cid, entity, maxAlter);
   return events;
 }
 
@@ -210,10 +217,11 @@ export function diffLedgers(ctx: DifferContext, ledgers: LedgerJSON[]): EventEnv
  * Returns true when a reset happened so the caller re-baselines silently.
  */
 function guardWatermarkRegression(ctx: DifferContext, entity: string, liveMax: number): boolean {
-  const stored = ctx.db.getWatermark(entity);
+  const cid = ctx.companyId ?? 'default';
+  const stored = ctx.db.getWatermark(cid, entity);
   if (stored > 0 && liveMax > 0 && liveMax < stored) {
-    ctx.db.clearEntity(entity);
-    ctx.db.clearEntity('vouchers');
+    ctx.db.clearEntity(cid, entity);
+    ctx.db.clearEntity(cid, 'vouchers');
     return true;
   }
   return false;

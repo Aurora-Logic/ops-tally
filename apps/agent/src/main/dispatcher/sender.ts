@@ -17,7 +17,7 @@ export interface DispatcherStatus {
 
 export interface DispatcherDeps {
   db: AgentDb;
-  getSettings: () => DispatcherSettings;
+  getSettings: (companyId?: string) => DispatcherSettings;
   onStatus?: (status: DispatcherStatus) => void;
   agentVersion?: string;
 }
@@ -59,16 +59,20 @@ export class Dispatcher {
 
     this.draining = true;
     try {
-      const { webhookUrl, secret } = this.deps.getSettings();
-      if (!webhookUrl || !secret) {
-        this.deps.onStatus?.({ state: 'no_webhook' });
-        return;
-      }
       // FIFO: keep taking the oldest due event until none are due.
       for (;;) {
         if (Date.now() < this.queuePausedUntil) break;
         const row = this.deps.db.nextDueEvent();
         if (!row) break;
+
+        const { webhookUrl, secret } = this.deps.getSettings(row.company_id);
+        if (!webhookUrl || !secret) {
+          this.deps.onStatus?.({ state: 'no_webhook', message: 'Webhook not configured' });
+          // Schedule a short backoff for this event so it doesn't spin
+          this.scheduleRetry(row, 'Webhook URL or secret not configured', 30);
+          break;
+        }
+
         const ok = await this.deliver(row, webhookUrl, secret);
         // Delivery failure re-schedules the event into the future and pauses the queue.
         if (!ok) break;
@@ -177,8 +181,8 @@ export class Dispatcher {
   }
 
   /** Fire a signed ping event directly (settings "Send test event" button). */
-  async sendTest(company: string, installId: string): Promise<{ ok: boolean; status?: number; error?: string }> {
-    const { webhookUrl, secret } = this.deps.getSettings();
+  async sendTest(company: string, installId: string, companyId?: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+    const { webhookUrl, secret } = this.deps.getSettings(companyId);
     if (!webhookUrl || !secret) return { ok: false, error: 'Webhook URL or secret not configured' };
     const envelope = makeEnvelope('ping', { message: 'OpsTally Agent test event' }, company, installId);
     const body = JSON.stringify(envelope);
@@ -204,8 +208,8 @@ export class Dispatcher {
   }
 
   /** Cancel all pending dispatches in the database and reset queue pause. */
-  cancelAll(): number {
-    const count = this.deps.db.cancelPendingEvents();
+  cancelAll(companyId?: string): number {
+    const count = this.deps.db.cancelPendingEvents(companyId);
     this.queuePausedUntil = 0;
     this.deps.onStatus?.({ state: 'idle', message: `Cancelled ${count} queued event(s)` });
     return count;

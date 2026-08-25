@@ -51,15 +51,25 @@ function dateWindows(from: Date, to: Date, months: number): { from: Date; to: Da
 
 export type PollEntity = 'vouchers' | 'stock' | 'ledgers';
 
+export interface PollerCompany {
+  id: string;
+  name: string;
+  enabled: boolean;
+  webhookUrl: string;
+  voucherTypes: string[];
+  intervalsMinutes: Record<PollEntity, number>;
+}
+
 export interface PollerSettings {
-  company: string;
   tallyHost: string;
   tallyPort: number;
   paused: boolean;
-  /** Only these voucher types are fetched from Tally at all. Empty means no restriction. */
-  voucherTypes: string[];
-  intervalsMinutes: Record<PollEntity, number>;
-  webhookUrl: string;
+  companies: PollerCompany[];
+  // Legacy / fallback fields:
+  company?: string;
+  webhookUrl?: string;
+  voucherTypes?: string[];
+  intervalsMinutes?: Record<PollEntity, number>;
 }
 
 export type PollerState = 'idle' | 'polling' | 'paused' | 'tally_down' | 'error';
@@ -82,8 +92,9 @@ export interface PollerDeps {
 const ENTITIES: PollEntity[] = ['vouchers', 'stock', 'ledgers'];
 
 /**
- * Serialized per-entity polling. Tally's gateway is effectively single-threaded,
- * so all polls run through one promise chain — never two requests in flight.
+ * Serialized per-entity polling across all enabled Tally companies.
+ * Tally's gateway is effectively single-threaded, so all polls run through
+ * one promise chain — never two requests in flight.
  */
 export class Poller {
   private deps: PollerDeps;
@@ -95,17 +106,49 @@ export class Poller {
     this.deps = deps;
   }
 
+  /** Normalizes settings into an array of active company targets. */
+  private getTargetCompanies(): PollerCompany[] {
+    const s = this.deps.getSettings();
+    if (Array.isArray(s.companies) && s.companies.length > 0) {
+      return s.companies.filter((c) => c.enabled && c.name.trim() !== '');
+    }
+    if (s.company && s.company.trim() !== '') {
+      return [
+        {
+          id: 'default',
+          name: s.company,
+          enabled: true,
+          webhookUrl: s.webhookUrl ?? '',
+          voucherTypes: s.voucherTypes ?? [],
+          intervalsMinutes: s.intervalsMinutes ?? { vouchers: 15, stock: 10, ledgers: 30 },
+        },
+      ];
+    }
+    return [];
+  }
+
   /** Returns the initial pass, so a caller that needs it can await the first sweep. */
   start(): Promise<void> {
     this.stop();
     this.stopped = false;
     const settings = this.deps.getSettings();
+    const companies = this.getTargetCompanies();
     for (const entity of ENTITIES) {
-      const minutes = Math.max(1, settings.intervalsMinutes[entity] ?? 10);
+      // Smallest configured interval for this entity among all companies
+      const minutes = Math.max(
+        1,
+        companies.length > 0
+          ? Math.min(...companies.map((c) => c.intervalsMinutes[entity] ?? 10))
+          : (settings.intervalsMinutes?.[entity] ?? 10)
+      );
       this.timers.push(setInterval(() => this.enqueuePoll(entity), minutes * 60_000));
     }
-    // Kick off an immediate first pass.
-    return this.pollAll();
+    // Kick off an initial pass after a brief 3s startup grace period (gives Tally time to finish booting)
+    const startupTimer = setTimeout(() => {
+      if (!this.stopped) void this.pollAll();
+    }, 3000);
+    this.timers.push(startupTimer as any);
+    return this.chain;
   }
 
   stop(): void {
@@ -114,27 +157,41 @@ export class Poller {
     this.timers = [];
   }
 
-  pollAll(): Promise<void> {
-    for (const entity of ENTITIES) this.enqueuePoll(entity);
+  pollAll(companyId?: string): Promise<void> {
+    for (const entity of ENTITIES) this.enqueuePoll(entity, companyId);
     return this.chain;
   }
 
+  /** Explicitly report Tally liveness (e.g. from user "Test connection" or "Load from Tally"). */
+  reportLiveness(ok: boolean, errorMsg?: string): void {
+    if (ok) {
+      this.deps.onStatus?.({ state: 'idle', lastPollAt: new Date().toISOString(), message: undefined });
+      void this.pollAll();
+    } else {
+      this.deps.onStatus?.({ state: 'tally_down', message: errorMsg ?? 'Tally is not running — please open Tally Prime' });
+    }
+  }
+
   /** Queue a poll for one entity onto the serialized chain. */
-  enqueuePoll(entity: PollEntity): Promise<void> {
-    this.chain = this.chain.then(() => this.pollOnce(entity)).catch(() => undefined);
+  enqueuePoll(entity: PollEntity, companyId?: string): Promise<void> {
+    this.chain = this.chain.then(() => this.pollOnce(entity, companyId)).catch(() => undefined);
     return this.chain;
   }
 
   /** Full stock resync — emits chunked stock.snapshot events regardless of diffs. */
-  fullStockResync(): Promise<void> {
+  fullStockResync(targetCompanyId?: string): Promise<void> {
     this.chain = this.chain
       .then(async () => {
-        const ctx = this.context(false);
-        if (!ctx) return;
-        const items = await this.deps.client.getStockItems();
-        const events = stockSnapshotEvents(ctx, items);
-        for (const e of events) this.deps.db.enqueueEvent(e);
-        if (events.length) this.deps.onEvents?.(events);
+        const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+        for (const company of companies) {
+          const ctx = this.context(company, false);
+          if (!ctx) continue;
+          const items = await this.deps.client.getStockItems();
+          const events = stockSnapshotEvents(ctx, items);
+          for (const e of events) this.deps.db.enqueueEvent(company.id, e);
+          if (events.length) this.deps.onEvents?.(events);
+          await sleep(150);
+        }
       })
       .catch((err) => this.reportError(err));
     return this.chain;
@@ -142,23 +199,26 @@ export class Poller {
 
   /**
    * Full ledger resync — emits chunked ledger.snapshot events for every
-   * ledger (parties included) regardless of diffs. Unlike vouchers there is no
-   * date dimension to walk: Tally returns the whole account list in one
-   * request, so this is a single fetch. Also advances the ledger watermark so
-   * a later poll doesn't re-baseline off a stale value.
+   * ledger (parties included) regardless of diffs.
    */
-  fullLedgerResync(): Promise<void> {
+  fullLedgerResync(targetCompanyId?: string): Promise<void> {
     this.chain = this.chain
       .then(async () => {
-        const ctx = this.context(false);
-        if (!ctx) return;
-        const ledgers = await this.deps.client.getLedgers();
-        const events = ledgerSnapshotEvents(ctx, ledgers);
-        for (const e of events) this.deps.db.enqueueEvent(e);
-        if (events.length) this.deps.onEvents?.(events);
+        const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+        for (const company of companies) {
+          const ctx = this.context(company, false);
+          if (!ctx) continue;
+          const ledgers = await this.deps.client.getLedgers();
+          const events = ledgerSnapshotEvents(ctx, ledgers);
+          for (const e of events) this.deps.db.enqueueEvent(company.id, e);
+          if (events.length) this.deps.onEvents?.(events);
 
-        const maxAlter = maxAlterId(ledgers);
-        if (maxAlter > this.deps.db.getWatermark('ledgers')) this.deps.db.setWatermark('ledgers', maxAlter);
+          const maxAlter = maxAlterId(ledgers);
+          if (maxAlter > this.deps.db.getWatermark(company.id, 'ledgers')) {
+            this.deps.db.setWatermark(company.id, 'ledgers', maxAlter);
+          }
+          await sleep(150);
+        }
       })
       .catch((err) => this.reportError(err));
     return this.chain;
@@ -167,77 +227,76 @@ export class Poller {
   /**
    * Full voucher resync — walks the company's entire history in
    * non-overlapping date windows (default 12 months), emitting chunked
-   * voucher.snapshot events per window regardless of diffs. Requests run
-   * strictly sequentially with a short delay between them (on top of the
-   * existing serialized `chain`) since a multi-year backfill against Tally's
-   * single-threaded gateway must not hammer it.
+   * voucher.snapshot events per window regardless of diffs.
    */
-  fullVoucherResync(): Promise<void> {
+  fullVoucherResync(targetCompanyId?: string): Promise<void> {
     this.chain = this.chain
       .then(async () => {
-        const ctx = this.context(false);
-        if (!ctx) return;
-        const settings = this.deps.getSettings();
+        const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+        for (const company of companies) {
+          const ctx = this.context(company, false);
+          if (!ctx) continue;
 
-        const toDate = new Date();
-        const fromDate = await this.resolveVoucherResyncStart(settings, toDate);
-        const windows = dateWindows(fromDate, toDate, RESYNC_WINDOW_MONTHS);
+          const toDate = new Date();
+          const fromDate = await this.resolveVoucherResyncStart(company.name, toDate);
+          const windows = dateWindows(fromDate, toDate, RESYNC_WINDOW_MONTHS);
 
-        let maxAlter = 0;
-        for (let i = 0; i < windows.length; i++) {
-          const { from, to } = windows[i];
-          const vouchers = await this.deps.client.getVouchers({
-            fromDate: from,
-            toDate: to,
-            voucherTypes: settings.voucherTypes,
-          });
-          const events = voucherSnapshotEvents(ctx, vouchers);
-          for (const e of events) this.deps.db.enqueueEvent(e);
-          if (events.length) this.deps.onEvents?.(events);
-          for (const v of vouchers) if (v.alterId > maxAlter) maxAlter = v.alterId;
-          if (i < windows.length - 1) await sleep(RESYNC_BATCH_DELAY_MS);
+          let maxAlter = 0;
+          for (let i = 0; i < windows.length; i++) {
+            const { from, to } = windows[i];
+            const vouchers = await this.deps.client.getVouchers({
+              fromDate: from,
+              toDate: to,
+              voucherTypes: company.voucherTypes,
+            });
+            const events = voucherSnapshotEvents(ctx, vouchers);
+            for (const e of events) this.deps.db.enqueueEvent(company.id, e);
+            if (events.length) this.deps.onEvents?.(events);
+            for (const v of vouchers) if (v.alterId > maxAlter) maxAlter = v.alterId;
+            if (i < windows.length - 1) await sleep(RESYNC_BATCH_DELAY_MS);
+          }
+
+          if (maxAlter > this.deps.db.getWatermark(company.id, 'vouchers')) {
+            this.deps.db.setWatermark(company.id, 'vouchers', maxAlter);
+          }
+          await sleep(150);
         }
-
-        if (maxAlter > this.deps.db.getWatermark('vouchers')) this.deps.db.setWatermark('vouchers', maxAlter);
       })
       .catch((err) => this.reportError(err));
     return this.chain;
   }
 
   /** Company's books-begin date from Tally when available, else a safe fallback. */
-  private async resolveVoucherResyncStart(settings: PollerSettings, toDate: Date): Promise<Date> {
+  private async resolveVoucherResyncStart(companyName: string, toDate: Date): Promise<Date> {
     try {
       const companies = await this.deps.client.listCompanies();
-      const match = companies.find((c) => c.name === settings.company);
+      const match = companies.find((c) => c.name === companyName);
       const parsed = parseTallyDateStr(match?.startingFrom);
       if (parsed) return parsed;
     } catch {
-      // Fall through to the fallback below — a failed probe shouldn't block the resync.
+      // Fall through to fallback
     }
     const fallback = new Date(toDate);
     fallback.setFullYear(fallback.getFullYear() - RESYNC_FALLBACK_YEARS);
     return fallback;
   }
 
-  private context(baseline: boolean): DifferContext | undefined {
+  private context(company: PollerCompany, baseline: boolean): DifferContext | undefined {
     const settings = this.deps.getSettings();
-    if (!settings.company) return undefined;
-    // Company switch invalidates all snapshots and watermarks.
-    const prevCompany = this.deps.db.getMeta('company');
-    if (prevCompany && prevCompany !== settings.company) this.deps.db.resetSyncState();
-    this.deps.db.setMeta('company', settings.company);
+    if (!company.name) return undefined;
     this.deps.client.host = settings.tallyHost;
     this.deps.client.port = settings.tallyPort;
-    this.deps.client.company = settings.company;
+    this.deps.client.company = company.name;
     return {
       db: this.deps.db,
-      company: settings.company,
+      company: company.name,
+      companyId: company.id,
       installId: this.deps.db.installId(),
       baseline,
     };
   }
 
-  private async pollOnce(entity: PollEntity): Promise<void> {
+  private async pollOnce(entity: PollEntity, targetCompanyId?: string): Promise<void> {
     if (this.stopped) return;
     const settings = this.deps.getSettings();
     if (settings.paused) {
@@ -245,74 +304,77 @@ export class Poller {
       return;
     }
 
-    // No webhook configured yet — nothing to deliver to, so skip the heavy
-    // entity pulls entirely. Only do a cheap reachability probe, and only on
-    // one of the three timers so we're not tripling even that.
-    if (!settings.webhookUrl) {
+    const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+
+    // If no company has a webhook configured, run reachability check
+    if (companies.length === 0 || !companies.some((c) => c.webhookUrl)) {
       if (entity === 'vouchers') await this.healthCheck(settings);
       return;
     }
 
-    const baselineKey = `baseline:${entity}`;
-    const isBaseline = this.deps.db.getMeta(baselineKey) !== 'done';
-    const ctx = this.context(isBaseline);
-    if (!ctx) return;
+    // Safety guard: Check if Tally Prime is running and query which companies are currently loaded in Tally.
+    // Querying an uninitialized or closed company in Tally causes a C++ Access Violation in tally.exe.
+    let loadedCompanies: string[] = [];
+    try {
+      this.deps.client.host = settings.tallyHost;
+      this.deps.client.port = settings.tallyPort;
+      const list = await this.deps.client.listCompanies();
+      loadedCompanies = list.map((c) => c.name.trim());
+    } catch (err: any) {
+      this.reportError(err);
+      return;
+    }
 
     this.deps.onStatus?.({ state: 'polling' });
     try {
-      let events: EventEnvelope[] = [];
-      let didReset = false;
-      if (entity === 'vouchers') {
-        const swept = await this.pollVouchers(ctx, settings);
-        events = swept.events;
-        didReset = swept.didReset;
-      } else if (entity === 'stock') {
-        const items = await this.deps.client.getStockItems();
-        events = diffStock(ctx, items);
-      } else {
-        const ledgers = await this.deps.client.getLedgers();
-        events = diffLedgers(ctx, ledgers);
-      }
+      for (const company of companies) {
+        if (!company.webhookUrl) continue;
+        // If company is not yet opened in Tally Prime, skip safely
+        if (!loadedCompanies.includes(company.name.trim())) {
+          continue;
+        }
 
-      // A reset wiped the baseline marker on purpose — leave it wiped.
-      if (!didReset) this.deps.db.setMeta(baselineKey, 'done');
-      for (const e of events) this.deps.db.enqueueEvent(e);
-      if (events.length) this.deps.onEvents?.(events);
+        const baselineKey = `baseline:${company.id}:${entity}`;
+        const isBaseline = this.deps.db.getMeta(baselineKey) !== 'done';
+        const ctx = this.context(company, isBaseline);
+        if (!ctx) continue;
+
+        let events: EventEnvelope[] = [];
+        let didReset = false;
+        if (entity === 'vouchers') {
+          const swept = await this.pollVouchers(ctx, company);
+          events = swept.events;
+          didReset = swept.didReset;
+        } else if (entity === 'stock') {
+          const items = await this.deps.client.getStockItems();
+          events = diffStock(ctx, items);
+        } else {
+          const ledgers = await this.deps.client.getLedgers();
+          events = diffLedgers(ctx, ledgers);
+        }
+
+        // A reset wiped the baseline marker on purpose — leave it wiped.
+        if (!didReset) this.deps.db.setMeta(baselineKey, 'done');
+        for (const e of events) this.deps.db.enqueueEvent(company.id, e);
+        if (events.length) this.deps.onEvents?.(events);
+
+        // Small pacing delay between company queries to prevent overloading Tally's memory manager
+        await sleep(150);
+      }
       this.deps.onStatus?.({ state: 'idle', lastPollAt: new Date().toISOString() });
     } catch (err: any) {
       this.reportError(err);
     }
   }
 
-  /**
-   * Poll vouchers across the company's whole history, one financial year per
-   * request.
-   *
-   * Why a walk rather than one dated request: Tally scopes a Voucher
-   * collection to the FINANCIAL YEAR containing the requested range, not to
-   * the range. Asking for 2018-04-01..2026-08-23 returns one year, and asking
-   * for a single day returns that day's whole year. There is no such thing as
-   * a narrow voucher fetch, so the only way to see every year is to ask for
-   * each one.
-   *
-   * Why that is affordable: the AlterID filter is applied by Tally, not here.
-   * Measured on a real company, one financial year of 17,144 vouchers is 82 MB
-   * unfiltered and 1.5 KB once `AlterID > watermark` is attached. Steady state
-   * is therefore N tiny responses. It still costs Tally real scan time per year
-   * (~9s on that company even when nothing matches), which is why the default
-   * voucher interval is minutes, not seconds, and why the requests are spaced.
-   *
-   * Requests run strictly sequentially with a pause between them, on top of
-   * the poller's own serialized chain — a multi-year sweep must not hammer
-   * Tally's single-threaded gateway.
-   */
+  /** Poll vouchers across the company's whole history, one financial year per request. */
   private async pollVouchers(
     ctx: DifferContext,
-    settings: PollerSettings
+    company: PollerCompany
   ): Promise<{ events: EventEnvelope[]; didReset: boolean }> {
-    const watermark = this.deps.db.getWatermark('vouchers');
+    const watermark = this.deps.db.getWatermark(company.id, 'vouchers');
     const toDate = new Date();
-    const fromDate = await this.resolveVoucherResyncStart(settings, toDate);
+    const fromDate = await this.resolveVoucherResyncStart(company.name, toDate);
     const windows = dateWindows(fromDate, toDate, RESYNC_WINDOW_MONTHS);
 
     const events: EventEnvelope[] = [];
@@ -324,37 +386,21 @@ export class Poller {
         fromDate: from,
         toDate: to,
         alterIdAbove: watermark > 0 ? watermark : undefined,
-        voucherTypes: settings.voucherTypes,
+        voucherTypes: company.voucherTypes,
       });
       const batchMax = maxAlterId(vouchers);
       if (batchMax > liveMax) liveMax = batchMax;
-      // `windowed`: this window owns neither the regression guard nor the
-      // watermark — see diffVouchers for why both are wrong per window.
       events.push(...diffVouchers(ctx, vouchers, { windowed: true }));
       if (i < windows.length - 1) await sleep(RESYNC_BATCH_DELAY_MS);
     }
 
-    /*
-     * The regression check, asked once, about the aggregate: a live max below
-     * our stored watermark means the company was restored from a backup or
-     * rewritten, and our snapshots describe books that no longer exist.
-     * Discard this sweep's events rather than delivering a flood of
-     * "created" for records the receiver already has, and clear the entity so
-     * the next poll re-baselines silently. Checked after the walk because the
-     * true company max is not known until every year has been asked.
-     */
-    if (isWatermarkRegression(this.deps.db, 'vouchers', liveMax)) {
-      this.deps.db.clearEntity('vouchers');
-      // didReset matters: clearEntity drops the `baseline:vouchers` marker, and
-      // the caller must NOT put it back. If it did, the next poll would run in
-      // non-baseline mode against snapshots we just emptied, and every voucher
-      // in the company would look new — the exact flood this guard exists to
-      // prevent, arriving one poll later.
+    if (isWatermarkRegression(this.deps.db, 'vouchers', liveMax, company.id)) {
+      this.deps.db.clearEntity(company.id, 'vouchers');
       return { events: [], didReset: true };
     }
 
-    if (liveMax > this.deps.db.getWatermark('vouchers')) {
-      this.deps.db.setWatermark('vouchers', liveMax);
+    if (liveMax > this.deps.db.getWatermark(company.id, 'vouchers')) {
+      this.deps.db.setWatermark(company.id, 'vouchers', liveMax);
     }
     return { events, didReset: false };
   }
