@@ -9,10 +9,18 @@ export default function PollingTab({
   patch: (p: Partial<PublicConfig>) => Promise<void>;
 }) {
   const [note, setNote] = useState('');
-  const [voucherTypesDraft, setVoucherTypesDraft] = useState((config.voucherTypes ?? []).join(', '));
+  const activeCompany = config.activeCompany ?? config.companies.find((c) => c.id === config.activeCompanyId) ?? config.companies[0];
+  const companyId = activeCompany?.id ?? config.activeCompanyId;
 
-  const setInterval_ = (key: keyof PublicConfig['intervalsMinutes'], value: number) =>
-    void patch({ intervalsMinutes: { ...config.intervalsMinutes, [key]: Math.max(1, value) } });
+  const [voucherTypesDraft, setVoucherTypesDraft] = useState((activeCompany?.voucherTypes ?? []).join(', '));
+
+  const setInterval_ = (key: keyof PublicConfig['intervalsMinutes'], value: number) => {
+    const nextIntervals = { ...(activeCompany?.intervalsMinutes ?? { vouchers: 15, stock: 10, ledgers: 30 }), [key]: Math.max(1, value) };
+    const updatedCompanies = config.companies.map((c) =>
+      c.id === companyId ? { ...c, intervalsMinutes: nextIntervals } : c
+    );
+    void patch({ companies: updatedCompanies, intervalsMinutes: nextIntervals });
+  };
 
   const commitVoucherTypes = () => {
     const types = voucherTypesDraft
@@ -20,12 +28,20 @@ export default function PollingTab({
       .map((t) => t.trim())
       .filter(Boolean);
     setVoucherTypesDraft(types.join(', '));
-    void patch({ voucherTypes: types });
+    const updatedCompanies = config.companies.map((c) =>
+      c.id === companyId ? { ...c, voucherTypes: types } : c
+    );
+    void patch({ companies: updatedCompanies, voucherTypes: types });
   };
 
   return (
     <div className="max-w-lg space-y-4">
-      <h2 className="text-base font-semibold">Polling</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">Polling intervals & triggers</h2>
+        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
+          {activeCompany?.name || 'Unnamed'}
+        </span>
+      </div>
 
       <div className="grid grid-cols-3 gap-3">
         {(
@@ -41,7 +57,7 @@ export default function PollingTab({
               type="number"
               min={1}
               className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              value={config.intervalsMinutes[key]}
+              value={activeCompany?.intervalsMinutes?.[key] ?? 15}
               onChange={(e) => setInterval_(key, parseInt(e.target.value, 10) || 1)}
             />
           </label>
@@ -71,7 +87,7 @@ export default function PollingTab({
             checked={config.paused}
             onChange={(e) => void patch({ paused: e.target.checked })}
           />
-          Pause polling
+          Pause all polling
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -86,8 +102,8 @@ export default function PollingTab({
       <div className="flex flex-wrap items-center gap-3 border-t pt-4">
         <button
           onClick={() => {
-            void api.runPollNow();
-            setNote('Poll queued');
+            void api.runPollNow(companyId);
+            setNote(`Poll queued for ${activeCompany?.name || 'company'}`);
           }}
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
@@ -95,8 +111,8 @@ export default function PollingTab({
         </button>
         <button
           onClick={() => {
-            if (window.confirm('Send the full stock list to your webhook as stock.snapshot events?')) {
-              void api.fullResync();
+            if (window.confirm(`Send the full stock list for "${activeCompany?.name || 'company'}" to your webhook as stock.snapshot events?`)) {
+              void api.fullResync(companyId);
               setNote('Full stock resync queued');
             }
           }}
@@ -108,10 +124,10 @@ export default function PollingTab({
           onClick={() => {
             if (
               window.confirm(
-                "Send this company's entire voucher history to your webhook as voucher.snapshot events? This is batched in date windows and may take a while on large companies."
+                `Send "${activeCompany?.name || 'company'}" entire voucher history to your webhook as voucher.snapshot events? This is batched in date windows and may take a while on large companies.`
               )
             ) {
-              void api.fullVoucherResync();
+              void api.fullVoucherResync(companyId);
               setNote('Full voucher resync queued — this can take a while on large histories');
             }
           }}
@@ -123,10 +139,10 @@ export default function PollingTab({
           onClick={() => {
             if (
               window.confirm(
-                'Send every ledger — parties included, with balances and contact details — to your webhook as ledger.snapshot events?'
+                `Send every ledger for "${activeCompany?.name || 'company'}" — parties included, with balances and contact details — to your webhook as ledger.snapshot events?`
               )
             ) {
-              void api.fullLedgerResync();
+              void api.fullLedgerResync(companyId);
               setNote('Full ledger resync queued');
             }
           }}
@@ -136,14 +152,14 @@ export default function PollingTab({
         </button>
         <button
           onClick={async () => {
-            if (window.confirm('Cancel all pending event dispatches currently in the queue?')) {
-              const res = await api.cancelAllEvents();
+            if (window.confirm(`Cancel all pending event dispatches for "${activeCompany?.name || 'company'}" currently in the queue?`)) {
+              const res = await api.cancelAllEvents(companyId);
               setNote(`Cancelled ${res.count} pending event(s)`);
             }
           }}
           className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
         >
-          Cancel all dispatches
+          Cancel dispatches
         </button>
         <span className="text-sm text-slate-500">{note}</span>
       </div>

@@ -24,11 +24,15 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-export default function DeliveriesTab() {
+export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: string }) {
   const [rows, setRows] = useState<DeliveryRow[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [filterCompany, setFilterCompany] = useState<string>(activeCompanyId ?? 'all');
 
-  const refresh = async () => setRows(await api.listDeliveries());
+  const refresh = async () => {
+    const list = await api.listDeliveries(filterCompany === 'all' ? undefined : filterCompany);
+    setRows(list);
+  };
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -43,18 +47,38 @@ export default function DeliveriesTab() {
     void refresh();
     const t = setInterval(() => void refresh(), 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [filterCompany]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Recent events</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold">Recent events</h2>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <button
+              onClick={() => setFilterCompany(activeCompanyId ?? 'all')}
+              className={`rounded px-2 py-1 ${
+                filterCompany !== 'all' ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-100'
+              }`}
+            >
+              Current company
+            </button>
+            <button
+              onClick={() => setFilterCompany('all')}
+              className={`rounded px-2 py-1 ${
+                filterCompany === 'all' ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-100'
+              }`}
+            >
+              All companies
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           {rows.some((r) => r.status === 'pending') && (
             <button
               onClick={async () => {
-                if (window.confirm('Cancel all pending events in queue?')) {
-                  await api.cancelAllEvents();
+                if (window.confirm('Cancel pending events in queue?')) {
+                  await api.cancelAllEvents(filterCompany === 'all' ? undefined : filterCompany);
                   await refresh();
                 }
               }}

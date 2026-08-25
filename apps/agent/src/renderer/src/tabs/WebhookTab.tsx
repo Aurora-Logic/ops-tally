@@ -12,22 +12,25 @@ export default function WebhookTab({
   const [result, setResult] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const reveal = async () => setSecret(await api.revealSecret());
+  const activeCompany = config.activeCompany ?? config.companies.find((c) => c.id === config.activeCompanyId) ?? config.companies[0];
+  const companyId = activeCompany?.id ?? config.activeCompanyId;
+
+  const reveal = async () => setSecret(await api.revealSecret(companyId));
 
   const regenerate = async () => {
-    if (!window.confirm('Regenerate the signing secret? Your server must be updated with the new secret or every delivery will fail verification.')) return;
-    setSecret(await api.regenerateSecret());
+    if (!window.confirm(`Regenerate the signing secret for "${activeCompany?.name || 'this company'}"? Your server connection secret must be updated or deliveries will fail verification.`)) return;
+    setSecret(await api.regenerateSecret(companyId));
   };
 
   const copy = async () => {
-    const s = secret ?? (await api.revealSecret());
+    const s = secret ?? (await api.revealSecret(companyId));
     await navigator.clipboard.writeText(s);
     setResult('Secret copied to clipboard');
   };
 
   const test = async () => {
     setBusy(true);
-    const res = await api.testWebhook();
+    const res = await api.testWebhook(companyId);
     setResult(
       res.ok
         ? `✓ Delivered (HTTP ${res.status})`
@@ -36,17 +39,29 @@ export default function WebhookTab({
     setBusy(false);
   };
 
+  const updateWebhookUrl = (webhookUrl: string) => {
+    const updatedCompanies = config.companies.map((c) =>
+      c.id === companyId ? { ...c, webhookUrl } : c
+    );
+    void patch({ companies: updatedCompanies, webhookUrl });
+  };
+
   return (
     <div className="max-w-lg space-y-4">
-      <h2 className="text-base font-semibold">Webhook</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">Webhook settings</h2>
+        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">
+          {activeCompany?.name || 'Unnamed'}
+        </span>
+      </div>
 
       <label className="block">
         <span className="text-sm text-slate-600">Webhook URL</span>
         <input
           className="mt-1 w-full rounded border px-3 py-2 text-sm"
           placeholder="https://your-server.example.com/api/v1/tally/webhook"
-          value={config.webhookUrl}
-          onChange={(e) => void patch({ webhookUrl: e.target.value })}
+          value={activeCompany?.webhookUrl ?? ''}
+          onChange={(e) => updateWebhookUrl(e.target.value)}
         />
       </label>
 
@@ -75,7 +90,7 @@ export default function WebhookTab({
       <div className="flex items-center gap-3">
         <button
           onClick={() => void test()}
-          disabled={busy || !config.webhookUrl}
+          disabled={busy || !activeCompany?.webhookUrl}
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           Send test event

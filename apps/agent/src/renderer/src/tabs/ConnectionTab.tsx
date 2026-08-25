@@ -31,9 +31,36 @@ export default function ConnectionTab({
     setBusy(false);
   };
 
+  const activeCompany = config.activeCompany ?? config.companies.find((c) => c.id === config.activeCompanyId) ?? config.companies[0];
+
+  const updateActiveCompanyName = (name: string) => {
+    const updatedCompanies = config.companies.map((c) =>
+      c.id === config.activeCompanyId ? { ...c, name } : c
+    );
+    void patch({ companies: updatedCompanies, company: name });
+  };
+
+  const toggleCompanyEnabled = (enabled: boolean) => {
+    const updatedCompanies = config.companies.map((c) =>
+      c.id === config.activeCompanyId ? { ...c, enabled } : c
+    );
+    void patch({ companies: updatedCompanies });
+  };
+
   return (
     <div className="max-w-lg space-y-4">
-      <h2 className="text-base font-semibold">Tally connection</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold">Tally connection & profile</h2>
+        <label className="flex items-center gap-2 text-xs font-medium text-slate-700 bg-slate-100 px-2.5 py-1 rounded">
+          <input
+            type="checkbox"
+            checked={activeCompany?.enabled ?? true}
+            onChange={(e) => toggleCompanyEnabled(e.target.checked)}
+          />
+          Sync enabled for this company
+        </label>
+      </div>
+
       <div className="grid grid-cols-3 gap-3">
         <label className="col-span-2 block">
           <span className="text-sm text-slate-600">Host</span>
@@ -55,13 +82,13 @@ export default function ConnectionTab({
       </div>
 
       <label className="block">
-        <span className="text-sm text-slate-600">Company</span>
+        <span className="text-sm text-slate-600">Company Name</span>
         <div className="mt-1 flex gap-2">
           {companies.length > 0 ? (
             <select
               className="w-full rounded border px-3 py-2 text-sm"
-              value={config.company}
-              onChange={(e) => void patch({ company: e.target.value })}
+              value={activeCompany?.name ?? ''}
+              onChange={(e) => updateActiveCompanyName(e.target.value)}
             >
               <option value="">— select —</option>
               {companies.map((c) => (
@@ -74,8 +101,8 @@ export default function ConnectionTab({
             <input
               className="w-full rounded border px-3 py-2 text-sm"
               placeholder="Company name as shown in Tally"
-              value={config.company}
-              onChange={(e) => void patch({ company: e.target.value })}
+              value={activeCompany?.name ?? ''}
+              onChange={(e) => updateActiveCompanyName(e.target.value)}
             />
           )}
           <button
