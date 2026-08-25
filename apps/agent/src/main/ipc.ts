@@ -4,10 +4,12 @@ import type { AgentDb } from './engine/db.js';
 import type { Poller } from './engine/poller.js';
 import type { Dispatcher } from './dispatcher/sender.js';
 import {
+  addCompany,
   getConfig,
+  getCompanySecret,
   getPublicConfig,
-  getSecret,
-  regenerateSecret,
+  regenerateCompanySecret,
+  removeCompany,
   updateConfig,
   type PublicConfig,
 } from './config.js';
@@ -24,7 +26,8 @@ export interface IpcDeps {
 
 function tallyClientFromConfig(): TallyClient {
   const cfg = getConfig();
-  return new TallyClient({ host: cfg.tallyHost, port: cfg.tallyPort, company: cfg.company });
+  const active = cfg.companies.find((c) => c.id === cfg.activeCompanyId);
+  return new TallyClient({ host: cfg.tallyHost, port: cfg.tallyPort, company: active?.name ?? '' });
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -39,38 +42,71 @@ export function registerIpc(deps: IpcDeps): void {
     return cfg;
   });
 
+  ipcMain.handle('company:add', (_e, name = '') => {
+    const pub = addCompany(name);
+    dispatcher.wake();
+    broadcastStatus();
+    return pub;
+  });
+
+  ipcMain.handle('company:remove', (_e, companyId: string) => {
+    const ok = removeCompany(companyId);
+    dispatcher.wake();
+    broadcastStatus();
+    return ok;
+  });
+
+  ipcMain.handle('company:setActive', (_e, companyId: string) => {
+    const cfg = updateConfig({ activeCompanyId: companyId });
+    broadcastStatus();
+    return cfg;
+  });
+
   ipcMain.handle('companies:list', async () => {
     try {
-      return { ok: true, companies: await tallyClientFromConfig().listCompanies() };
+      const companies = await tallyClientFromConfig().listCompanies();
+      poller.reportLiveness(true);
+      broadcastStatus();
+      return { ok: true, companies };
     } catch (err: any) {
-      return { ok: false, error: err instanceof TallyError ? err.message : String(err?.message ?? err) };
+      const msg = err instanceof TallyError ? err.message : String(err?.message ?? err);
+      poller.reportLiveness(false, msg);
+      broadcastStatus();
+      return { ok: false, error: msg };
     }
   });
 
   ipcMain.handle('tally:test', async () => {
     try {
       const companies = await tallyClientFromConfig().listCompanies();
-      return { ok: true, message: `Connected — ${companies.length} company(ies) loaded` };
+      poller.reportLiveness(true);
+      broadcastStatus();
+      return { ok: true, message: `Connected — ${companies.length} company(ies) loaded in Tally` };
     } catch (err: any) {
-      return { ok: false, error: err instanceof TallyError ? err.message : String(err?.message ?? err) };
+      const msg = err instanceof TallyError ? err.message : String(err?.message ?? err);
+      poller.reportLiveness(false, msg);
+      broadcastStatus();
+      return { ok: false, error: msg };
     }
   });
 
-  ipcMain.handle('webhook:test', async () => {
+  ipcMain.handle('webhook:test', async (_e, companyId?: string) => {
     const cfg = getConfig();
-    return dispatcher.sendTest(cfg.company, db.installId());
+    const targetId = companyId || cfg.activeCompanyId;
+    const comp = cfg.companies.find((c) => c.id === targetId) ?? cfg.companies[0];
+    return dispatcher.sendTest(comp?.name ?? '', db.installId(), targetId);
   });
 
-  ipcMain.handle('secret:reveal', () => getSecret());
+  ipcMain.handle('secret:reveal', (_e, companyId?: string) => getCompanySecret(companyId));
 
-  ipcMain.handle('secret:regenerate', () => {
-    const s = regenerateSecret();
+  ipcMain.handle('secret:regenerate', (_e, companyId?: string) => {
+    const s = regenerateCompanySecret(companyId);
     dispatcher.wake();
     return s;
   });
 
-  ipcMain.handle('deliveries:list', () =>
-    db.recentEvents(100).map((row) => {
+  ipcMain.handle('deliveries:list', (_e, companyId?: string) =>
+    db.recentEvents(100, companyId).map((row) => {
       let products: string[] | undefined;
       try {
         const envelope = JSON.parse(row.payload_json) as { payload?: unknown };
@@ -80,6 +116,7 @@ export function registerIpc(deps: IpcDeps): void {
       }
       return {
         id: row.id,
+        company_id: row.company_id,
         event: row.event,
         created_at: row.created_at,
         status: row.status,
@@ -98,31 +135,31 @@ export function registerIpc(deps: IpcDeps): void {
     return true;
   });
 
-  ipcMain.handle('events:cancelAll', () => {
-    const count = dispatcher.cancelAll();
+  ipcMain.handle('events:cancelAll', (_e, companyId?: string) => {
+    const count = dispatcher.cancelAll(companyId);
     broadcastStatus();
     return { ok: true, count };
   });
 
-  ipcMain.handle('queue:stats', () => db.queueStats());
+  ipcMain.handle('queue:stats', (_e, companyId?: string) => db.queueStats(companyId));
 
-  ipcMain.handle('poll:runNow', () => {
-    void poller.pollAll();
+  ipcMain.handle('poll:runNow', (_e, companyId?: string) => {
+    void poller.pollAll(companyId);
     return true;
   });
 
-  ipcMain.handle('poll:fullResync', () => {
-    void poller.fullStockResync();
+  ipcMain.handle('poll:fullResync', (_e, companyId?: string) => {
+    void poller.fullStockResync(companyId);
     return true;
   });
 
-  ipcMain.handle('poll:fullVoucherResync', () => {
-    void poller.fullVoucherResync();
+  ipcMain.handle('poll:fullVoucherResync', (_e, companyId?: string) => {
+    void poller.fullVoucherResync(companyId);
     return true;
   });
 
-  ipcMain.handle('poll:fullLedgerResync', () => {
-    void poller.fullLedgerResync();
+  ipcMain.handle('poll:fullLedgerResync', (_e, companyId?: string) => {
+    void poller.fullLedgerResync(companyId);
     return true;
   });
 
