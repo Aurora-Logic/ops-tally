@@ -32,17 +32,18 @@ export default function ConnectionTab({
   };
 
   const activeCompany = config.activeCompany ?? config.companies.find((c) => c.id === config.activeCompanyId) ?? config.companies[0];
+  const companyId = activeCompany?.id ?? config.activeCompanyId;
 
   const updateActiveCompanyName = (name: string) => {
     const updatedCompanies = config.companies.map((c) =>
-      c.id === config.activeCompanyId ? { ...c, name } : c
+      c.id === companyId ? { ...c, name } : c
     );
     void patch({ companies: updatedCompanies, company: name });
   };
 
   const toggleCompanyEnabled = (enabled: boolean) => {
     const updatedCompanies = config.companies.map((c) =>
-      c.id === config.activeCompanyId ? { ...c, enabled } : c
+      c.id === companyId ? { ...c, enabled } : c
     );
     void patch({ companies: updatedCompanies });
   };

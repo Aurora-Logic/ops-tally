@@ -4,7 +4,7 @@ import { TallyClient } from '@opstally/tally-client';
 import { AgentDb } from './engine/db.js';
 import { Poller, type PollerStatus } from './engine/poller.js';
 import { Dispatcher, type DispatcherStatus } from './dispatcher/sender.js';
-import { ensureSecret, getConfig, getSecret, updateConfig } from './config.js';
+import { ensureSecret, getConfig, getCompanySecret, getSecret, updateConfig } from './config.js';
 import { AgentTray, type TrayState } from './tray.js';
 import { registerIpc } from './ipc.js';
 import { initLogging, log } from './logging.js';

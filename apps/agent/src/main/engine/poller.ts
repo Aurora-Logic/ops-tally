@@ -325,11 +325,16 @@ export class Poller {
       return;
     }
 
-    const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+    const allCompanies = this.getTargetCompanies();
+    const companies = allCompanies.filter((c) => !targetCompanyId || c.id === targetCompanyId);
 
-    // If no company has a webhook configured, run reachability check
-    if (companies.length === 0 || !companies.some((c) => c.webhookUrl)) {
+    // If no company has a webhook configured at all, run reachability check
+    if (allCompanies.length === 0 || !allCompanies.some((c) => c.webhookUrl)) {
       if (entity === 'vouchers') await this.healthCheck(settings);
+      return;
+    }
+
+    if (companies.length === 0) {
       return;
     }
 
