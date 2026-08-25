@@ -5,9 +5,11 @@ directories:
 files:
   - out/**
   - package.json
+  - resources/**
 asarUnpack:
   - "**/node_modules/better-sqlite3/**"
 win:
+  icon: resources/icon.png
   target:
     - nsis
 nsis:
