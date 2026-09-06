@@ -12,6 +12,11 @@ export interface CompanyInfo {
   startingFrom?: string;
 }
 
+export interface VoucherTypeInfo {
+  name: string;
+  parent?: string;
+}
+
 /**
  * How a bank line was settled. Present only on the bank ledger's entry of a
  * Receipt/Payment/Contra — Tally nests it under the ledger entry, not the

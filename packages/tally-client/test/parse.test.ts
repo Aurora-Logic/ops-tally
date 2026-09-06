@@ -7,6 +7,7 @@ import { parseStockCollection } from '../src/parse/stock.js';
 import { parseVoucherCollection } from '../src/parse/vouchers.js';
 import { parseSalesRates } from '../src/parse/salesRates.js';
 import { parseLedgerCollection } from '../src/parse/ledgers.js';
+import { parseVoucherTypeCollection } from '../src/parse/voucherTypes.js';
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const load = async (name: string) =>
@@ -201,5 +202,40 @@ describe('parseVoucher order, terms, dispatch and settlement detail', () => {
     expect(sales.deliveryTerms).toEqual([]);
     expect(sales.buyerAddress).toEqual([]);
     expect(sales.ledgerEntries.every((e) => e.bankAllocation === undefined)).toBe(true);
+  });
+});
+
+describe('parseVoucherTypeCollection', () => {
+  it('parses voucher types collection XML correctly', async () => {
+    const xml = `
+      <ENVELOPE>
+        <BODY>
+          <DATA>
+            <COLLECTION>
+              <VOUCHERTYPE NAME="Sales" PARENT="Sales">
+                <NAME>Sales</NAME>
+                <PARENT>Sales</PARENT>
+              </VOUCHERTYPE>
+              <VOUCHERTYPE NAME="GST SALES" PARENT="Sales">
+                <NAME>GST SALES</NAME>
+                <PARENT>Sales</PARENT>
+              </VOUCHERTYPE>
+              <VOUCHERTYPE NAME="Purchase" PARENT="Purchase">
+                <NAME>Purchase</NAME>
+                <PARENT>Purchase</PARENT>
+              </VOUCHERTYPE>
+            </COLLECTION>
+          </DATA>
+        </BODY>
+      </ENVELOPE>
+    `;
+    const parsed = await parseStringPromise(xml, { explicitArray: false });
+    const types = parseVoucherTypeCollection(parsed);
+    expect(types).toHaveLength(3);
+    expect(types).toEqual([
+      { name: 'GST SALES', parent: 'Sales' },
+      { name: 'Purchase', parent: 'Purchase' },
+      { name: 'Sales', parent: 'Sales' },
+    ]);
   });
 });

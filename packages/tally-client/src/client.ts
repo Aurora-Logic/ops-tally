@@ -4,12 +4,14 @@ import { buildCompaniesXML } from './queries/companies.js';
 import { buildVouchersXML } from './queries/vouchers.js';
 import { buildStockItemsXML } from './queries/stockItems.js';
 import { buildLedgersXML } from './queries/ledgers.js';
+import { buildVoucherTypesXML } from './queries/voucherTypes.js';
 import { buildSalesRatesXML } from './queries/salesRates.js';
 import { buildPurchaseRatesXML } from './queries/purchaseRates.js';
 import { parseCompanyCollection } from './parse/companies.js';
 import { parseVoucherCollection } from './parse/vouchers.js';
 import { parseStockCollection } from './parse/stock.js';
 import { parseLedgerCollection } from './parse/ledgers.js';
+import { parseVoucherTypeCollection } from './parse/voucherTypes.js';
 import { parseSalesRates } from './parse/salesRates.js';
 import { parsePurchaseRates } from './parse/purchaseRates.js';
 import type {
@@ -19,6 +21,7 @@ import type {
   TallyClientOptions,
   VoucherJSON,
   VoucherQueryOptions,
+  VoucherTypeInfo,
 } from './types.js';
 
 export class TallyClient {
@@ -83,5 +86,9 @@ export class TallyClient {
 
   async getLedgers(): Promise<LedgerJSON[]> {
     return parseLedgerCollection(await this.exec(buildLedgersXML(this.company)));
+  }
+
+  async getVoucherTypes(): Promise<VoucherTypeInfo[]> {
+    return parseVoucherTypeCollection(await this.exec(buildVoucherTypesXML(this.company)));
   }
 }
