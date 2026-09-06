@@ -20,6 +20,8 @@ const api = {
   fullResync: (companyId?: string) => ipcRenderer.invoke('poll:fullResync', companyId),
   fullVoucherResync: (companyId?: string) => ipcRenderer.invoke('poll:fullVoucherResync', companyId),
   fullLedgerResync: (companyId?: string) => ipcRenderer.invoke('poll:fullLedgerResync', companyId),
+  getVoucherTypes: (companyId?: string) => ipcRenderer.invoke('voucherTypes:get', companyId),
+  refreshVoucherTypes: (companyId?: string) => ipcRenderer.invoke('voucherTypes:refresh', companyId),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('settings:set', patch),
   onStatus: (cb: (status: unknown) => void) => {

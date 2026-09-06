@@ -169,6 +169,14 @@ export function registerIpc(deps: IpcDeps): void {
     return true;
   });
 
+  ipcMain.handle('voucherTypes:get', (_e, companyId?: string) => {
+    return poller.getVoucherTypes(companyId);
+  });
+
+  ipcMain.handle('voucherTypes:refresh', async (_e, companyId?: string) => {
+    return await poller.refreshVoucherTypes(companyId);
+  });
+
   ipcMain.handle('settings:get', () => getSettings());
 
   ipcMain.handle('settings:set', (_e, patch: Partial<GlobalSettings>) => setSettings(patch));

@@ -37,8 +37,19 @@ export interface DeliveryRow {
   products?: string[];
 }
 
+export interface VoucherTypeInfo {
+  name: string;
+  parent?: string;
+}
+
+export interface VoucherTypesResult {
+  types: VoucherTypeInfo[];
+  lastVerifiedAt: string | null;
+}
+
 export interface GlobalSettings {
   license: { key: string | null };
+  voucherTypesVerificationDays?: number;
 }
 
 export interface StatusPush {
@@ -75,6 +86,8 @@ export interface OpsTallyApi {
   fullResync(companyId?: string): Promise<boolean>;
   fullVoucherResync(companyId?: string): Promise<boolean>;
   fullLedgerResync(companyId?: string): Promise<boolean>;
+  getVoucherTypes(companyId?: string): Promise<VoucherTypesResult>;
+  refreshVoucherTypes(companyId?: string): Promise<VoucherTypesResult>;
   getSettings(): Promise<GlobalSettings>;
   setSettings(patch: Partial<GlobalSettings>): Promise<GlobalSettings>;
   onStatus(cb: (status: StatusPush) => void): () => void;
