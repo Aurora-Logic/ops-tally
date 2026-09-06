@@ -111,7 +111,7 @@ export function getConfig(): AgentConfig {
       secretEncrypted: initialSecretEnc,
       secretPlain: initialSecretPlain,
       intervalsMinutes: raw.intervalsMinutes ?? { vouchers: 15, stock: 10, ledgers: 30 },
-      voucherTypes: raw.voucherTypes ?? ['Sales', 'GST SALES', 'Purchase', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
+      voucherTypes: raw.voucherTypes ?? ['Sales', 'GST SALES', 'Sales Order', 'Delivery Note', 'Purchase', 'GST PURCHASE', 'Purchase Order', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
     };
 
     companies = [defaultProfile];
@@ -149,7 +149,7 @@ export function getPublicConfig(): PublicConfig {
     company: active?.name ?? '',
     webhookUrl: active?.webhookUrl ?? '',
     intervalsMinutes: active?.intervalsMinutes ?? { vouchers: 15, stock: 10, ledgers: 30 },
-    voucherTypes: active?.voucherTypes ?? ['Sales', 'GST SALES', 'Purchase', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
+    voucherTypes: active?.voucherTypes ?? ['Sales', 'GST SALES', 'Sales Order', 'Delivery Note', 'Purchase', 'GST PURCHASE', 'Purchase Order', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
   };
 }
 
@@ -238,7 +238,7 @@ export function addCompany(name = ''): PublicCompanyProfile {
     secretEncrypted: generated.secretEncrypted,
     secretPlain: generated.secretPlain,
     intervalsMinutes: { vouchers: 15, stock: 10, ledgers: 30 },
-    voucherTypes: ['Sales', 'GST SALES', 'Purchase', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
+    voucherTypes: ['Sales', 'GST SALES', 'Sales Order', 'Delivery Note', 'Purchase', 'GST PURCHASE', 'Purchase Order', 'Receipt', 'Payment', 'Journal', 'Credit Note', 'Debit Note'],
   };
 
   const companies = [...cfg.companies, newProfile];
