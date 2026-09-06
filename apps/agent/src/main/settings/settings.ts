@@ -13,6 +13,7 @@ const settingsSchema = z.object({
       key: z.string().nullable().default(null),
     })
     .default({ key: null }),
+  voucherTypesVerificationDays: z.number().int().min(1).max(365).default(7),
 });
 
 export type GlobalSettings = z.infer<typeof settingsSchema>;

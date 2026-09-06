@@ -130,6 +130,13 @@ export class AgentDb {
         duration_ms INTEGER,
         error TEXT
       );
+      CREATE TABLE IF NOT EXISTS voucher_types (
+        company_id TEXT NOT NULL DEFAULT 'default',
+        name TEXT NOT NULL,
+        parent TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (company_id, name)
+      );
     `);
 
     // Migration for legacy schema without company_id column
@@ -361,6 +368,41 @@ export class AgentDb {
       if (r.status in stats) (stats as any)[r.status] = r.n;
     }
     return stats;
+  }
+
+  // ---- voucher types cache ----
+  getVoucherTypes(companyId = 'default'): { name: string; parent?: string }[] {
+    const rows = this.db
+      .prepare('SELECT name, parent FROM voucher_types WHERE company_id = ? ORDER BY name ASC')
+      .all(companyId) as { name: string; parent: string | null }[];
+    return rows.map((r) => ({ name: r.name, parent: r.parent ?? undefined }));
+  }
+
+  saveVoucherTypes(companyId = 'default', types: { name: string; parent?: string }[]): void {
+    const now = new Date().toISOString();
+    const insert = this.db.prepare(
+      `INSERT INTO voucher_types (company_id, name, parent, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(company_id, name) DO UPDATE SET parent = excluded.parent, updated_at = excluded.updated_at`
+    );
+    const tx = this.db.transaction(() => {
+      if (types.length > 0) {
+        const placeholders = types.map(() => '?').join(',');
+        this.db
+          .prepare(`DELETE FROM voucher_types WHERE company_id = ? AND name NOT IN (${placeholders})`)
+          .run(companyId, ...types.map((t) => t.name));
+      } else {
+        this.db.prepare('DELETE FROM voucher_types WHERE company_id = ?').run(companyId);
+      }
+      for (const t of types) {
+        insert.run(companyId, t.name, t.parent ?? null, now);
+      }
+      this.setMeta(`voucher_types_verified_at:${companyId}`, now);
+    });
+    tx();
+  }
+
+  getVoucherTypesLastVerifiedAt(companyId = 'default'): string | null {
+    return this.getMeta(`voucher_types_verified_at:${companyId}`) ?? null;
   }
 
   close(): void {

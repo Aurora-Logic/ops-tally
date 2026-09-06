@@ -186,7 +186,7 @@ export function updateConfig(patch: Partial<PublicConfig>): PublicConfig {
     companies: nextCompanies,
   };
 
-  store.set(updated);
+  store.set(updated as any);
   return getPublicConfig();
 }
 

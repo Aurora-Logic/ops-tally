@@ -1,5 +1,6 @@
-import { TallyClient, TallyNotRunningError, TallyBusyError } from '@opstally/tally-client';
+import { TallyClient, TallyNotRunningError, TallyBusyError, type VoucherTypeInfo } from '@opstally/tally-client';
 import type { AgentDb } from './db.js';
+import { getSettings } from '../settings/settings.js';
 import {
   diffLedgers,
   diffStock,
@@ -64,7 +65,7 @@ export interface PollerSettings {
   tallyHost: string;
   tallyPort: number;
   paused: boolean;
-  companies: PollerCompany[];
+  companies?: PollerCompany[];
   // Legacy / fallback fields:
   company?: string;
   webhookUrl?: string;
@@ -167,7 +168,7 @@ export class Poller {
 
   async pollAll(companyId?: string): Promise<PollResult> {
     const settings = this.deps.getSettings();
-    const targetId = companyId || settings.companies[0]?.id || 'default';
+    const targetId = companyId || settings.companies?.[0]?.id || 'default';
     for (const entity of ENTITIES) {
       this.enqueuePoll(entity, targetId);
     }
@@ -243,6 +244,73 @@ export class Poller {
       })
       .catch((err) => this.reportError(err));
     return this.chain;
+  }
+
+  /**
+   * Cached voucher types for a company from SQLite without hitting Tally.
+   */
+  getVoucherTypes(companyId?: string): { types: VoucherTypeInfo[]; lastVerifiedAt: string | null } {
+    const settings = this.deps.getSettings();
+    const targetId = companyId || settings.companies?.[0]?.id || 'default';
+    return {
+      types: this.deps.db.getVoucherTypes(targetId),
+      lastVerifiedAt: this.deps.db.getVoucherTypesLastVerifiedAt(targetId),
+    };
+  }
+
+  /**
+   * Force refresh voucher types from Tally Prime for a company and update SQLite.
+   */
+  async refreshVoucherTypes(targetCompanyId?: string): Promise<{ types: VoucherTypeInfo[]; lastVerifiedAt: string | null }> {
+    const settings = this.deps.getSettings();
+    const companies = this.getTargetCompanies().filter((c) => !targetCompanyId || c.id === targetCompanyId);
+    const company = companies[0] ?? (settings.companies?.find((c) => !targetCompanyId || c.id === targetCompanyId) as PollerCompany | undefined);
+    const targetId = targetCompanyId || company?.id || 'default';
+
+    if (!company?.name) {
+      return this.getVoucherTypes(targetId);
+    }
+
+    this.deps.client.host = settings.tallyHost;
+    this.deps.client.port = settings.tallyPort;
+    this.deps.client.company = company.name;
+    const types = await this.deps.client.getVoucherTypes();
+    if (types.length > 0) {
+      this.deps.db.saveVoucherTypes(targetId, types);
+      this.deps.onLog?.(`[poller] refreshed ${types.length} voucher types from Tally for "${company.name}"`);
+    }
+    return {
+      types: this.deps.db.getVoucherTypes(targetId),
+      lastVerifiedAt: this.deps.db.getVoucherTypesLastVerifiedAt(targetId),
+    };
+  }
+
+  /**
+   * Idle-queue verification: When the delivery queue has 0 pending items, verify
+   * voucher types against Tally Prime if the verification interval has elapsed.
+   */
+  private async verifyVoucherTypesIfDue(company: PollerCompany): Promise<void> {
+    try {
+      // Check if delivery queue is idle
+      if (this.deps.db.queueStats(company.id).pending > 0) return;
+
+      const lastVerified = this.deps.db.getVoucherTypesLastVerifiedAt(company.id);
+      const days = getSettings().voucherTypesVerificationDays ?? 7;
+      const intervalMs = Math.max(1, days) * 86_400_000;
+      const now = Date.now();
+
+      if (!lastVerified || now - new Date(lastVerified).getTime() >= intervalMs) {
+        this.deps.client.company = company.name;
+        const types = await this.deps.client.getVoucherTypes();
+        if (types.length > 0) {
+          this.deps.db.saveVoucherTypes(company.id, types);
+          this.deps.onLog?.(`[poller] idle-queue verified ${types.length} voucher types for "${company.name}" (interval: ${days}d)`);
+        }
+      }
+    } catch (err) {
+      // Background verification error is non-fatal
+      this.deps.onLog?.(`[poller] background voucher types verification for "${company.name}" skipped: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -392,6 +460,9 @@ export class Poller {
         if (!didReset) this.deps.db.setMeta(baselineKey, 'done');
         for (const e of events) this.deps.db.enqueueEvent(company.id, e);
         if (events.length) this.deps.onEvents?.(events);
+
+        // Verify voucher types in the background when the delivery queue is idle
+        await this.verifyVoucherTypesIfDue(company);
 
         // Small pacing delay between company queries to prevent overloading Tally's memory manager
         await sleep(150);
