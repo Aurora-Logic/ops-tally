@@ -57,6 +57,13 @@ export interface VoucherJSON {
   guid: string;
   date: string;
   voucherType: string;
+  /**
+   * This voucher type's resolved primary type (walking Tally's PARENT chain
+   * to its root — e.g. "GST SALES" -> "Sales"), when the voucher-type cache
+   * had an entry for it at fetch time. Undefined means unresolved, not "no
+   * root" — a consumer should not treat that as "Other".
+   */
+  voucherRootType?: string;
   voucherNumber: string;
   party: string;
   narration: string;

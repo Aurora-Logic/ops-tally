@@ -14,6 +14,7 @@ export { parseStockItem, parseStockCollection } from './parse/stock.js';
 export { parseLedger, parseLedgerCollection } from './parse/ledgers.js';
 export { parseCompanyCollection } from './parse/companies.js';
 export { parseVoucherTypeCollection } from './parse/voucherTypes.js';
+export { resolveVoucherTypeRoots } from './voucherTypeHierarchy.js';
 export { parseSalesRates } from './parse/salesRates.js';
 export { parsePurchaseRates } from './parse/purchaseRates.js';
 export { buildCompaniesXML } from './queries/companies.js';
