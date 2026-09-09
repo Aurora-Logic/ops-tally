@@ -28,10 +28,69 @@ export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: s
   const [rows, setRows] = useState<DeliveryRow[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [filterCompany, setFilterCompany] = useState<string>(activeCompanyId ?? 'all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  const showFeedback = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setFeedback({ text, type });
+    setTimeout(() => {
+      setFeedback((current) => (current?.text === text ? null : current));
+    }, 4000);
+  };
 
   const refresh = async () => {
     const list = await api.listDeliveries(filterCompany === 'all' ? undefined : filterCompany);
     setRows(list);
+  };
+
+  const handleRefresh = async () => {
+    setActionLoading('refresh');
+    try {
+      await refresh();
+      showFeedback('Deliveries refreshed', 'info');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleResumeRetryAll = async () => {
+    setActionLoading('resume');
+    try {
+      const res = await api.retryAllEvents(filterCompany === 'all' ? undefined : filterCompany);
+      await refresh();
+      showFeedback(`✓ Queue resumed — retrying ${res.count} event(s)`, 'success');
+    } catch (err: any) {
+      showFeedback(`✗ Failed to resume queue: ${err?.message || err}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCancelPending = async () => {
+    if (!window.confirm('Cancel pending events in queue?')) return;
+    setActionLoading('cancel');
+    try {
+      const res = await api.cancelAllEvents(filterCompany === 'all' ? undefined : filterCompany);
+      await refresh();
+      showFeedback(`✓ Cancelled ${res.count} pending event(s)`, 'info');
+    } catch (err: any) {
+      showFeedback(`✗ Failed to cancel events: ${err?.message || err}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRetrySingle = async (id: string) => {
+    setActionLoading(`retry-${id}`);
+    try {
+      await api.retryEvent(id);
+      await refresh();
+      showFeedback('✓ Event queued for immediate retry', 'success');
+    } catch (err: any) {
+      showFeedback(`✗ Retry failed: ${err?.message || err}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const toggleExpanded = (id: string) => {
@@ -51,13 +110,33 @@ export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: s
 
   return (
     <div className="space-y-3">
+      {feedback && (
+        <div
+          className={`flex items-center justify-between rounded px-3 py-2 text-xs font-medium transition-all ${
+            feedback.type === 'error'
+              ? 'bg-red-50 text-red-800 border border-red-200'
+              : feedback.type === 'info'
+              ? 'bg-blue-50 text-blue-800 border border-blue-200'
+              : 'bg-green-50 text-green-800 border border-green-200'
+          }`}
+        >
+          <span>{feedback.text}</span>
+          <button
+            onClick={() => setFeedback(null)}
+            className="text-slate-400 hover:text-slate-600 font-bold ml-2"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h2 className="text-base font-semibold">Recent events</h2>
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <button
               onClick={() => setFilterCompany(activeCompanyId ?? 'all')}
-              className={`rounded px-2 py-1 ${
+              className={`rounded px-2 py-1 transition-colors ${
                 filterCompany !== 'all' ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-100'
               }`}
             >
@@ -65,7 +144,7 @@ export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: s
             </button>
             <button
               onClick={() => setFilterCompany('all')}
-              className={`rounded px-2 py-1 ${
+              className={`rounded px-2 py-1 transition-colors ${
                 filterCompany === 'all' ? 'bg-blue-100 text-blue-700 font-medium' : 'hover:bg-slate-100'
               }`}
             >
@@ -74,21 +153,33 @@ export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: s
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {rows.some((r) => r.status === 'pending') && (
+          {rows.some((r) => r.status === 'pending' || r.status === 'failed') && (
             <button
-              onClick={async () => {
-                if (window.confirm('Cancel pending events in queue?')) {
-                  await api.cancelAllEvents(filterCompany === 'all' ? undefined : filterCompany);
-                  await refresh();
-                }
-              }}
-              className="rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+              onClick={() => void handleResumeRetryAll()}
+              disabled={actionLoading === 'resume'}
+              title="Unpause queue and immediately retry pending & failed events"
+              className="flex items-center gap-1.5 rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer shadow-xs"
             >
-              Cancel pending
+              <span className={actionLoading === 'resume' ? 'animate-spin' : ''}>↻</span>
+              <span>{actionLoading === 'resume' ? 'Resuming queue...' : 'Resume & Retry queue'}</span>
             </button>
           )}
-          <button onClick={() => void refresh()} className="rounded border px-3 py-1.5 text-sm hover:bg-slate-100">
-            Refresh
+          {rows.some((r) => r.status === 'pending') && (
+            <button
+              onClick={() => void handleCancelPending()}
+              disabled={actionLoading === 'cancel'}
+              className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <span>{actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel pending'}</span>
+            </button>
+          )}
+          <button
+            onClick={() => void handleRefresh()}
+            disabled={actionLoading === 'refresh'}
+            className="flex items-center gap-1 rounded border px-3 py-1.5 text-sm hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+          >
+            <span className={actionLoading === 'refresh' ? 'animate-spin' : ''}>↻</span>
+            <span>{actionLoading === 'refresh' ? 'Refreshing...' : 'Refresh'}</span>
           </button>
         </div>
       </div>
@@ -143,10 +234,11 @@ export default function DeliveriesTab({ activeCompanyId }: { activeCompanyId?: s
                       <td className="px-3 py-2">
                         {(r.status === 'failed' || r.status === 'cancelled') && (
                           <button
-                            onClick={() => void api.retryEvent(r.id).then(refresh)}
-                            className="rounded border px-2 py-1 text-xs hover:bg-slate-100"
+                            onClick={() => void handleRetrySingle(r.id)}
+                            disabled={actionLoading === `retry-${r.id}`}
+                            className="rounded border px-2 py-1 text-xs hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
                           >
-                            Retry
+                            {actionLoading === `retry-${r.id}` ? 'Retrying...' : 'Retry'}
                           </button>
                         )}
                       </td>

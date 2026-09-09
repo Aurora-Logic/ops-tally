@@ -202,6 +202,72 @@ export default function PollingTab({
     }
   };
 
+  const [resyncAction, setResyncAction] = useState<string | null>(null);
+
+  const handleFullStockResync = async () => {
+    if (!window.confirm(`Send the full stock list for "${activeCompany?.name || 'company'}" to your webhook as stock.snapshot events?`)) return;
+    setResyncAction('stock');
+    setNote('Queueing full stock resync...');
+    try {
+      await api.fullResync(companyId);
+      setNote('✓ Full stock resync queued — check Deliveries tab for live progress');
+    } catch (err: any) {
+      setNote(`✗ Failed to queue stock resync: ${err?.message || err}`);
+    } finally {
+      setResyncAction(null);
+    }
+  };
+
+  const handleFullVoucherResync = async () => {
+    if (
+      !window.confirm(
+        `Send "${activeCompany?.name || 'company'}" entire voucher history to your webhook as voucher.snapshot events? This is batched in date windows and may take a while on large companies.`
+      )
+    ) return;
+    setResyncAction('vouchers');
+    setNote('Queueing full voucher resync...');
+    try {
+      await api.fullVoucherResync(companyId);
+      setNote('✓ Full voucher resync queued — check Deliveries tab for live progress');
+    } catch (err: any) {
+      setNote(`✗ Failed to queue voucher resync: ${err?.message || err}`);
+    } finally {
+      setResyncAction(null);
+    }
+  };
+
+  const handleFullLedgerResync = async () => {
+    if (
+      !window.confirm(
+        `Send every ledger for "${activeCompany?.name || 'company'}" — parties included, with balances and contact details — to your webhook as ledger.snapshot events?`
+      )
+    ) return;
+    setResyncAction('ledgers');
+    setNote('Queueing full ledger resync...');
+    try {
+      await api.fullLedgerResync(companyId);
+      setNote('✓ Full ledger resync queued — check Deliveries tab for live progress');
+    } catch (err: any) {
+      setNote(`✗ Failed to queue ledger resync: ${err?.message || err}`);
+    } finally {
+      setResyncAction(null);
+    }
+  };
+
+  const handleCancelDispatches = async () => {
+    if (!window.confirm(`Cancel all pending event dispatches for "${activeCompany?.name || 'company'}" currently in the queue?`)) return;
+    setResyncAction('cancel');
+    setNote('Cancelling pending dispatches...');
+    try {
+      const res = await api.cancelAllEvents(companyId);
+      setNote(`✓ Cancelled ${res.count} pending event(s) in queue`);
+    } catch (err: any) {
+      setNote(`✗ Failed to cancel dispatches: ${err?.message || err}`);
+    } finally {
+      setResyncAction(null);
+    }
+  };
+
   return (
     <div className="max-w-lg space-y-4">
       <div className="flex items-center justify-between">
@@ -464,68 +530,54 @@ export default function PollingTab({
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={() => void handleSyncNow()}
-            disabled={syncing}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            disabled={syncing || !!resyncAction}
+            className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 cursor-pointer shadow-xs"
           >
-            {syncing ? 'Checking Tally...' : 'Sync now (Check changes)'}
+            <span className={syncing ? 'animate-spin' : ''}>{syncing ? '↻' : ''}</span>
+            <span>{syncing ? 'Checking Tally...' : 'Sync now (Check changes)'}</span>
           </button>
           <button
-            onClick={() => {
-              if (window.confirm(`Send the full stock list for "${activeCompany?.name || 'company'}" to your webhook as stock.snapshot events?`)) {
-                void api.fullResync(companyId);
-                setNote('Full stock resync queued — check Deliveries tab');
-              }
-            }}
-            className="rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100"
+            onClick={() => void handleFullStockResync()}
+            disabled={syncing || !!resyncAction}
+            className="flex items-center gap-1.5 rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
           >
-            Full stock resync
+            <span className={resyncAction === 'stock' ? 'animate-spin' : ''}>{resyncAction === 'stock' ? '↻' : ''}</span>
+            <span>{resyncAction === 'stock' ? 'Queueing stock...' : 'Full stock resync'}</span>
           </button>
           <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Send "${activeCompany?.name || 'company'}" entire voucher history to your webhook as voucher.snapshot events? This is batched in date windows and may take a while on large companies.`
-                )
-              ) {
-                void api.fullVoucherResync(companyId);
-                setNote('Full voucher resync queued — check Deliveries tab');
-              }
-            }}
-            className="rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100"
+            onClick={() => void handleFullVoucherResync()}
+            disabled={syncing || !!resyncAction}
+            className="flex items-center gap-1.5 rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
           >
-            Full voucher resync
+            <span className={resyncAction === 'vouchers' ? 'animate-spin' : ''}>{resyncAction === 'vouchers' ? '↻' : ''}</span>
+            <span>{resyncAction === 'vouchers' ? 'Queueing vouchers...' : 'Full voucher resync'}</span>
           </button>
           <button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Send every ledger for "${activeCompany?.name || 'company'}" — parties included, with balances and contact details — to your webhook as ledger.snapshot events?`
-                )
-              ) {
-                void api.fullLedgerResync(companyId);
-                setNote('Full ledger resync queued — check Deliveries tab');
-              }
-            }}
-            className="rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100"
+            onClick={() => void handleFullLedgerResync()}
+            disabled={syncing || !!resyncAction}
+            className="flex items-center gap-1.5 rounded border px-3.5 py-2 text-xs font-medium hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
           >
-            Full ledger resync
+            <span className={resyncAction === 'ledgers' ? 'animate-spin' : ''}>{resyncAction === 'ledgers' ? '↻' : ''}</span>
+            <span>{resyncAction === 'ledgers' ? 'Queueing ledgers...' : 'Full ledger resync'}</span>
           </button>
           <button
-            onClick={async () => {
-              if (window.confirm(`Cancel all pending event dispatches for "${activeCompany?.name || 'company'}" currently in the queue?`)) {
-                const res = await api.cancelAllEvents(companyId);
-                setNote(`Cancelled ${res.count} pending event(s)`);
-              }
-            }}
-            className="rounded border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-medium text-red-700 hover:bg-red-100"
+            onClick={() => void handleCancelDispatches()}
+            disabled={syncing || !!resyncAction}
+            className="flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
           >
-            Cancel dispatches
+            <span>{resyncAction === 'cancel' ? 'Cancelling...' : 'Cancel dispatches'}</span>
           </button>
         </div>
 
         {note && (
-          <div className={`text-xs p-2 rounded ${note.startsWith('✗') ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-800'}`}>
-            {note}
+          <div className={`text-xs p-2 rounded flex items-center justify-between transition-all ${note.startsWith('✗') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-800 border border-blue-200'}`}>
+            <span>{note}</span>
+            <button
+              onClick={() => setNote('')}
+              className="text-slate-400 hover:text-slate-600 font-bold ml-2"
+            >
+              ×
+            </button>
           </div>
         )}
       </div>

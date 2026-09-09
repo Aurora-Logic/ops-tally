@@ -126,13 +126,21 @@ export default function App() {
           {tab === 'Webhook' && <WebhookTab config={config} patch={patch} />}
           {tab === 'Polling' && <PollingTab config={config} patch={patch} />}
           {tab === 'Deliveries' && <DeliveriesTab activeCompanyId={config.activeCompanyId} />}
-          {tab === 'Settings' && <SettingsTab />}
+          {tab === 'Settings' && <SettingsTab config={config} patch={patch} />}
         </ErrorBoundary>
       </main>
 
-      {status?.poller.message && (
-        <footer className="border-t bg-amber-50 px-6 py-2 text-sm text-amber-800">
-          {status.poller.message}
+      {(status?.dispatcher.message || status?.poller.message) && (
+        <footer className="border-t bg-amber-50 px-6 py-2 text-xs text-amber-900 flex items-center justify-between">
+          <span>{status?.dispatcher.message || status?.poller.message}</span>
+          {status?.dispatcher.state === 'retrying' && (
+            <button
+              onClick={() => void api.resumeQueue()}
+              className="ml-4 rounded border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            >
+              Resume now
+            </button>
+          )}
         </footer>
       )}
     </div>

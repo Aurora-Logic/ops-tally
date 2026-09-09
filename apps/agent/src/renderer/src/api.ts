@@ -79,6 +79,8 @@ export interface OpsTallyApi {
   regenerateSecret(companyId?: string): Promise<string>;
   listDeliveries(companyId?: string): Promise<DeliveryRow[]>;
   retryEvent(id: string): Promise<boolean>;
+  retryAllEvents(companyId?: string): Promise<{ ok: boolean; count: number }>;
+  resumeQueue(): Promise<boolean>;
   cancelAllEvents(companyId?: string): Promise<{ ok: boolean; count: number }>;
   queueStats(companyId?: string): Promise<{ pending: number; delivered: number; failed: number }>;
   runPollNow(companyId?: string): Promise<PollResult>;
