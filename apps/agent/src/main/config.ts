@@ -192,8 +192,8 @@ export function updateConfig(patch: Partial<PublicConfig>): PublicConfig {
 
 export function getCompanySecret(companyId?: string): string {
   const cfg = getConfig();
-  const targetId = companyId || cfg.activeCompanyId;
-  const company = cfg.companies.find((c) => c.id === targetId) ?? cfg.companies[0];
+  const targetId = companyId ?? cfg.activeCompanyId;
+  const company = cfg.companies.find((c) => c.id === targetId);
   if (!company) return '';
   return decryptSecret(company.secretEncrypted, company.secretPlain);
 }

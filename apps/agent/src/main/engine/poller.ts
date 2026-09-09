@@ -1,4 +1,11 @@
-import { TallyClient, TallyNotRunningError, TallyBusyError, type VoucherTypeInfo } from '@opstally/tally-client';
+import {
+  TallyClient,
+  TallyNotRunningError,
+  TallyBusyError,
+  resolveVoucherTypeRoots,
+  type VoucherTypeInfo,
+  type VoucherJSON,
+} from '@opstally/tally-client';
 import type { AgentDb } from './db.js';
 import { getSettings } from '../settings/settings.js';
 import {
@@ -92,6 +99,8 @@ export interface PollerDeps {
   db: AgentDb;
   client: TallyClient;
   getSettings: () => PollerSettings;
+  /** Check if the dispatcher delivery queue is currently paused/rate-limited for a company or globally. */
+  isQueuePaused?: (companyId?: string) => boolean;
   /** Called with freshly enqueued events — lets the dispatcher wake immediately. */
   onEvents?: (events: EventEnvelope[]) => void;
   onStatus?: (status: PollerStatus) => void;
@@ -333,11 +342,12 @@ export class Poller {
           let maxAlter = 0;
           for (let i = 0; i < windows.length; i++) {
             const { from, to } = windows[i];
-            const vouchers = await this.deps.client.getVouchers({
+            const rawVouchers = await this.deps.client.getVouchers({
               fromDate: from,
               toDate: to,
               voucherTypes: company.voucherTypes,
             });
+            const vouchers = await this.attachVoucherRootTypes(company, rawVouchers);
             const events = voucherSnapshotEvents(ctx, vouchers);
             for (const e of events) this.deps.db.enqueueEvent(company.id, e);
             if (events.length) this.deps.onEvents?.(events);
@@ -427,6 +437,11 @@ export class Poller {
           continue;
         }
 
+        if (this.deps.isQueuePaused?.(company.id)) {
+          this.deps.onLog?.(`[poller] skipped "${company.name}" (delivery queue is rate-limited/cooling down)`);
+          continue;
+        }
+
         const matchName = loadedCompanies.find((lc) => lc.toLowerCase() === company.name.trim().toLowerCase());
         // If company is not yet opened in Tally Prime, skip safely
         if (!matchName) {
@@ -488,12 +503,13 @@ export class Poller {
 
     for (let i = 0; i < windows.length; i++) {
       const { from, to } = windows[i];
-      const vouchers = await this.deps.client.getVouchers({
+      const rawVouchers = await this.deps.client.getVouchers({
         fromDate: from,
         toDate: to,
         alterIdAbove: watermark > 0 ? watermark : undefined,
         voucherTypes: company.voucherTypes,
       });
+      const vouchers = await this.attachVoucherRootTypes(company, rawVouchers);
       const batchMax = maxAlterId(vouchers);
       if (batchMax > liveMax) liveMax = batchMax;
       events.push(...diffVouchers(ctx, vouchers, { windowed: true }));
@@ -509,6 +525,39 @@ export class Poller {
       this.deps.db.setWatermark(company.id, 'vouchers', liveMax);
     }
     return { events, didReset: false };
+  }
+
+  /**
+   * Stamps each voucher with its resolved primary type (e.g. "GST SALES" ->
+   * "Sales"), so a consumer can classify by what Tally's own hierarchy says a
+   * voucher IS instead of matching one company's literal type name.
+   *
+   * Fetches the voucher-type collection once if the cache is empty (fresh
+   * install, before the first idle-queue verification has run) so the very
+   * first poll resolves correctly rather than leaving every voucher
+   * unresolved until the next verification cycle.
+   */
+  private async attachVoucherRootTypes(company: PollerCompany, vouchers: VoucherJSON[]): Promise<VoucherJSON[]> {
+    let types = this.deps.db.getVoucherTypes(company.id);
+    if (types.length === 0) {
+      try {
+        this.deps.client.company = company.name;
+        const fetched = await this.deps.client.getVoucherTypes();
+        if (fetched.length > 0) {
+          this.deps.db.saveVoucherTypes(company.id, fetched);
+          types = fetched;
+        }
+      } catch {
+        // Best-effort — vouchers still sync with voucherRootType left unresolved.
+      }
+    }
+    if (types.length === 0) return vouchers;
+
+    const roots = resolveVoucherTypeRoots(types);
+    return vouchers.map((v) => {
+      const root = roots.get(v.voucherType);
+      return root ? { ...v, voucherRootType: root } : v;
+    });
   }
 
   /** Cheap liveness probe (company list only) used while no webhook is set. */

@@ -178,6 +178,15 @@ export class AgentDb {
         this.db.exec(`ALTER TABLE events ADD COLUMN company_id TEXT NOT NULL DEFAULT 'default';`);
       }
     } catch {}
+
+    // Auto-cancel legacy orphan 'default' events that cannot be routed to a specific company
+    try {
+      this.db.exec(`
+        UPDATE events
+        SET status = 'cancelled', last_error = 'Legacy orphan event cancelled during migration'
+        WHERE company_id = 'default' AND status = 'pending';
+      `);
+    } catch {}
   }
 
   // ---- meta ----
@@ -282,8 +291,8 @@ export class AgentDb {
       .run(envelope.id, companyId, envelope.event, JSON.stringify(envelope), envelope.created_at, envelope.created_at);
   }
 
-  /** Oldest pending event that is due, FIFO. */
-  nextDueEvent(now = new Date(), companyId?: string): EventRow | undefined {
+  /** Oldest pending event that is due, FIFO. Supports per-company exclusion. */
+  nextDueEvent(now = new Date(), companyId?: string, excludeCompanyIds?: string[]): EventRow | undefined {
     if (companyId) {
       return this.db
         .prepare(
@@ -291,6 +300,15 @@ export class AgentDb {
            ORDER BY created_at ASC LIMIT 1`
         )
         .get(companyId, now.toISOString()) as EventRow | undefined;
+    }
+    if (excludeCompanyIds && excludeCompanyIds.length > 0) {
+      const placeholders = excludeCompanyIds.map(() => '?').join(',');
+      return this.db
+        .prepare(
+          `SELECT * FROM events WHERE status = 'pending' AND company_id NOT IN (${placeholders}) AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           ORDER BY created_at ASC LIMIT 1`
+        )
+        .get(...excludeCompanyIds, now.toISOString()) as EventRow | undefined;
     }
     return this.db
       .prepare(
@@ -322,6 +340,19 @@ export class AgentDb {
     this.db
       .prepare("UPDATE events SET status = 'pending', attempts = 0, next_attempt_at = ?, last_error = NULL WHERE id = ?")
       .run(new Date().toISOString(), id);
+  }
+
+  retryAllPending(companyId?: string): number {
+    if (companyId) {
+      const res = this.db
+        .prepare("UPDATE events SET status = 'pending', attempts = 0, next_attempt_at = ? WHERE company_id = ? AND (status = 'pending' OR status = 'failed')")
+        .run(new Date().toISOString(), companyId);
+      return Number(res.changes);
+    }
+    const res = this.db
+      .prepare("UPDATE events SET status = 'pending', attempts = 0, next_attempt_at = ? WHERE status = 'pending' OR status = 'failed'")
+      .run(new Date().toISOString());
+    return Number(res.changes);
   }
 
   cancelPendingEvents(companyId?: string): number {

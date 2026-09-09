@@ -30,7 +30,7 @@ export class Dispatcher {
   private deps: DispatcherDeps;
   private timer: ReturnType<typeof setInterval> | undefined;
   private draining = false;
-  private queuePausedUntil = 0;
+  private pausedUntilByCompany = new Map<string, number>();
 
   constructor(deps: DispatcherDeps) {
     this.deps = deps;
@@ -48,36 +48,68 @@ export class Dispatcher {
   }
 
   /** Wake immediately (poller found new events, or settings updated). */
-  wake(): void {
-    this.queuePausedUntil = 0;
+  wake(companyId?: string): void {
+    if (companyId) {
+      this.pausedUntilByCompany.delete(companyId);
+    } else {
+      this.pausedUntilByCompany.clear();
+    }
     void this.drain();
+  }
+
+  isRateLimited(companyId?: string): boolean {
+    if (companyId) {
+      return (this.pausedUntilByCompany.get(companyId) ?? 0) > Date.now();
+    }
+    return [...this.pausedUntilByCompany.values()].some((t) => Date.now() < t);
+  }
+
+  getQueuePausedUntil(companyId?: string): number {
+    if (companyId) {
+      return this.pausedUntilByCompany.get(companyId) ?? 0;
+    }
+    return Math.max(0, ...this.pausedUntilByCompany.values());
   }
 
   private async drain(): Promise<void> {
     if (this.draining) return;
-    if (Date.now() < this.queuePausedUntil) return;
 
     this.draining = true;
     try {
-      // FIFO: keep taking the oldest due event until none are due.
+      // FIFO: keep taking the oldest due event for unpaused companies until none are due.
       for (;;) {
-        if (Date.now() < this.queuePausedUntil) break;
-        const row = this.deps.db.nextDueEvent();
+        const now = Date.now();
+        const pausedCompanyIds = [...this.pausedUntilByCompany.entries()]
+          .filter(([_, t]) => now < t)
+          .map(([cid]) => cid);
+
+        const row = this.deps.db.nextDueEvent(new Date(), undefined, pausedCompanyIds);
         if (!row) break;
 
         const { webhookUrl, secret } = this.deps.getSettings(row.company_id);
         if (!webhookUrl || !secret) {
-          this.deps.onStatus?.({ state: 'no_webhook', message: 'Webhook not configured' });
-          // Schedule a short backoff for this event so it doesn't spin
-          this.scheduleRetry(row, 'Webhook URL or secret not configured', 30);
-          break;
+          // If event belongs to legacy 'default' or an unconfigured company
+          if (row.company_id === 'default') {
+            this.deps.db.markFailed(row.id, 'Legacy orphan event cancelled');
+            continue;
+          }
+
+          this.deps.onStatus?.({ state: 'no_webhook', message: 'Webhook not configured or company disabled' });
+          // Schedule a backoff for this company's event and pause this company in this cycle
+          this.scheduleRetry(row, 'Webhook URL or secret not configured or company disabled', 300);
+          this.pausedUntilByCompany.set(row.company_id, Date.now() + 300_000);
+          continue;
         }
 
         const ok = await this.deliver(row, webhookUrl, secret);
-        // Delivery failure re-schedules the event into the future and pauses the queue.
-        if (!ok) break;
+        if (!ok) {
+          // Delivery failure re-scheduled the event into the future and paused that specific company.
+          // Loop continues to check if other companies have events to deliver!
+        }
       }
-      if (Date.now() >= this.queuePausedUntil) {
+
+      const anyPaused = [...this.pausedUntilByCompany.values()].some((t) => Date.now() < t);
+      if (!anyPaused) {
         this.deps.onStatus?.({ state: 'idle' });
       }
     } finally {
@@ -95,43 +127,70 @@ export class Dispatcher {
       this.deps.db.recordDelivery(row.id, res.status, duration);
       if (res.ok) {
         this.deps.db.markDelivered(row.id);
-        this.queuePausedUntil = 0;
+        this.pausedUntilByCompany.delete(row.company_id);
         this.deps.onStatus?.({ state: 'idle', lastDeliveryAt: new Date().toISOString() });
         return true;
       }
 
+      // Extract error detail from response body if present
+      let errorDetail = '';
+      try {
+        const text = await res.text();
+        try {
+          const json = JSON.parse(text);
+          errorDetail = json.message || json.error?.message || json.error || text;
+        } catch {
+          errorDetail = text;
+        }
+      } catch {}
+
       // Handle specific HTTP failure statuses
+      if (res.status === 409) {
+        const errorMsg = errorDetail
+          ? `Conflict (HTTP 409): ${errorDetail}`
+          : 'Conflict (HTTP 409): Company name or install ID mismatch between Tally and Vyuha.';
+        const pauseS = this.scheduleRetry(row, errorMsg);
+        this.pausedUntilByCompany.set(row.company_id, Date.now() + pauseS * 1000);
+        this.deps.onStatus?.({ state: 'retrying', message: errorMsg });
+        return false;
+      }
+
       if (res.status === 429) {
-        // Rate limited: check Retry-After header or response body
-        let retryDelayS = 60;
+        // Rate limited: default to 15 minutes (900s) if header/body doesn't specify
+        let retryDelayS = 900;
         const retryAfterHeader = res.headers.get('retry-after');
         if (retryAfterHeader && !Number.isNaN(Number(retryAfterHeader))) {
           retryDelayS = Math.max(5, parseInt(retryAfterHeader, 10));
-        } else {
+        } else if (errorDetail) {
           try {
-            const errJson = (await res.clone().json()) as any;
-            if (errJson?.error?.details?.retryAfterSeconds) {
-              retryDelayS = Number(errJson.error.details.retryAfterSeconds);
+            const json = JSON.parse(errorDetail);
+            if (json?.details?.retryAfterSeconds || json?.error?.details?.retryAfterSeconds) {
+              retryDelayS = Number(json.details?.retryAfterSeconds ?? json.error?.details?.retryAfterSeconds);
             }
           } catch {}
         }
-        const errorMsg = `Rate limited (HTTP 429). Pausing queue for ${retryDelayS}s...`;
-        this.queuePausedUntil = Date.now() + retryDelayS * 1000;
+        const resumeTimeStr = new Date(Date.now() + retryDelayS * 1000).toLocaleTimeString();
+        const errorMsg = `Rate limited (HTTP 429). Pausing queue for ${Math.round(retryDelayS / 60)}m (until ${resumeTimeStr}). ${errorDetail ? `Server: ${errorDetail}` : ''}`;
+        this.pausedUntilByCompany.set(row.company_id, Date.now() + retryDelayS * 1000);
         this.scheduleRetry(row, errorMsg, retryDelayS);
+        this.deps.onStatus?.({ state: 'retrying', message: errorMsg });
         return false;
       }
 
       if (res.status === 401) {
         // Authentication failed: bad secret or URL
-        const errorMsg = 'Webhook authentication failed (HTTP 401). Check secret in settings.';
+        const errorMsg = `Webhook auth failed (HTTP 401): ${errorDetail || 'Check secret in settings.'}`;
         const pauseS = 60;
-        this.queuePausedUntil = Date.now() + pauseS * 1000;
+        this.pausedUntilByCompany.set(row.company_id, Date.now() + pauseS * 1000);
         this.scheduleRetry(row, errorMsg, pauseS);
+        this.deps.onStatus?.({ state: 'retrying', message: errorMsg });
         return false;
       }
 
-      const pauseS = this.scheduleRetry(row, `HTTP ${res.status}`);
-      this.queuePausedUntil = Date.now() + pauseS * 1000;
+      const errorMsg = errorDetail ? `HTTP ${res.status}: ${errorDetail}` : `HTTP ${res.status}`;
+      const pauseS = this.scheduleRetry(row, errorMsg);
+      this.pausedUntilByCompany.set(row.company_id, Date.now() + pauseS * 1000);
+      this.deps.onStatus?.({ state: 'retrying', message: errorMsg });
       return false;
     } catch (err: any) {
       const isAbort = err.name === 'AbortError';
@@ -140,7 +199,7 @@ export class Dispatcher {
         : (err.message ?? 'Network error');
       this.deps.db.recordDelivery(row.id, null, Date.now() - started, msg);
       const pauseS = this.scheduleRetry(row, msg);
-      this.queuePausedUntil = Date.now() + pauseS * 1000;
+      this.pausedUntilByCompany.set(row.company_id, Date.now() + pauseS * 1000);
       return false;
     }
   }
@@ -180,6 +239,19 @@ export class Dispatcher {
     return delayS;
   }
 
+  /** Force retry all pending/failed events and unpause queue. */
+  retryAll(companyId?: string): number {
+    if (companyId) {
+      this.pausedUntilByCompany.delete(companyId);
+    } else {
+      this.pausedUntilByCompany.clear();
+    }
+    const count = this.deps.db.retryAllPending(companyId);
+    this.wake(companyId);
+    this.deps.onStatus?.({ state: 'idle', message: `Retrying ${count} event(s)...` });
+    return count;
+  }
+
   /** Fire a signed ping event directly (settings "Send test event" button). */
   async sendTest(company: string, installId: string, companyId?: string): Promise<{ ok: boolean; status?: number; error?: string }> {
     const { webhookUrl, secret } = this.deps.getSettings(companyId);
@@ -199,7 +271,7 @@ export class Dispatcher {
         body,
       });
       if (res.ok) {
-        this.wake();
+        this.wake(companyId);
       }
       return { ok: res.ok, status: res.status };
     } catch (err: any) {
@@ -209,8 +281,12 @@ export class Dispatcher {
 
   /** Cancel all pending dispatches in the database and reset queue pause. */
   cancelAll(companyId?: string): number {
+    if (companyId) {
+      this.pausedUntilByCompany.delete(companyId);
+    } else {
+      this.pausedUntilByCompany.clear();
+    }
     const count = this.deps.db.cancelPendingEvents(companyId);
-    this.queuePausedUntil = 0;
     this.deps.onStatus?.({ state: 'idle', message: `Cancelled ${count} queued event(s)` });
     return count;
   }
