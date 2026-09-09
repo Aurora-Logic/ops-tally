@@ -60,10 +60,16 @@ if (!gotLock) {
     db,
     getSettings: (companyId?: string) => {
       const cfg = getConfig();
-      const targetId = companyId || cfg.activeCompanyId;
-      const comp = cfg.companies.find((c) => c.id === targetId) ?? cfg.companies[0];
+      const targetId = companyId ?? cfg.activeCompanyId;
+      const comp = cfg.companies.find((c) => c.id === targetId);
+      if (!comp || !comp.enabled) {
+        return {
+          webhookUrl: '',
+          secret: '',
+        };
+      }
       return {
-        webhookUrl: comp?.webhookUrl ?? '',
+        webhookUrl: comp.webhookUrl ?? '',
         secret: getCompanySecret(targetId),
       };
     },
@@ -96,6 +102,7 @@ if (!gotLock) {
         })),
       };
     },
+    isQueuePaused: () => dispatcher.isRateLimited(),
     onEvents: (events) => {
       log.info(`[poller] ${events.length} new event(s): ${events.map((e) => e.event).join(', ')}`);
       dispatcher.wake();

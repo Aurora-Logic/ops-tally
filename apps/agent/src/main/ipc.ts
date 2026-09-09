@@ -50,6 +50,11 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   ipcMain.handle('company:remove', (_e, companyId: string) => {
+    db.resetSyncState(companyId);
+    db.cancelPendingEvents(companyId);
+    db.clearEntity(companyId, 'vouchers');
+    db.clearEntity(companyId, 'stock');
+    db.clearEntity(companyId, 'ledgers');
     const ok = removeCompany(companyId);
     dispatcher.wake();
     broadcastStatus();
@@ -132,6 +137,18 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle('events:retry', (_e, id: string) => {
     db.retryEvent(id);
     dispatcher.wake();
+    return true;
+  });
+
+  ipcMain.handle('events:retryAll', (_e, companyId?: string) => {
+    const count = dispatcher.retryAll(companyId);
+    broadcastStatus();
+    return { ok: true, count };
+  });
+
+  ipcMain.handle('queue:resume', () => {
+    dispatcher.wake();
+    broadcastStatus();
     return true;
   });
 
